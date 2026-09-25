@@ -1,0 +1,5 @@
+gameplay-10s.mp4 — real 10-second recording of level 6 (Ice), seed 2026, 1280x720 full-window layout, with the
+background-life layer (cliff slides, snow curtains, cloud shadows, gusts, birds) running. Headless Chrome 153 on an
+Intel Arc Pro GPU. Played by scripts/record.mjs: a simple bot pressing the real ArrowLeft/ArrowRight keys, using the
+?debug hook only to read where rocks are. After ~11.5 s of play the bot had 450 points, 1 shield banked, 3 hearts
+(7 gold, 1 emerald, 1 shield caught; hazards avoided). The clip is the last 10 s of that play.

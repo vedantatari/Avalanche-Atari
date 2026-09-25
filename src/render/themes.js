@@ -1,0 +1,60 @@
+// Theme palettes. Themes change materials, lighting, scenery, and ambience only —
+// never item effects, spawn tables, or difficulty.
+
+export const THEME_INFO = {
+  ice: {
+    id: 'ice',
+    label: 'Ice',
+    blurb: 'Snowy slate cliffs · research hut',
+    sky: ['#5f9fd8', '#a9d0ee', '#eef1ec'],
+    fog: '#cfdeea',
+    fogDensity: 0.0075,
+    hemi: { sky: '#e4efff', ground: '#8d7a66', intensity: 1.7 },
+    sun: { color: '#ffe0b0', intensity: 3.6, dir: [-0.6, 0.72, 0.6] },
+    rim: { color: '#9cc6ff', intensity: 0.6 },
+    wall: ['#7a8490', '#707a87', '#838d99', '#69737f'],
+    block: ['#b3a99d', '#a79d92', '#bcb2a5', '#aba195'],
+    cap: '#f3f7fb',
+    capKind: 'snow',
+    mountain: '#8a9bb3',
+    mountainTop: '#f7f9fc',
+    ground: '#eef3f8',
+    groundRock: '#7d746b',
+    tree: '#2d5a3e',
+    treeKind: 'pine',
+    accent: '#ffb35c',
+    rail: '#3d4148',
+    particles: { kind: 'snow', color: '#ffffff' },
+    window: '#ffc46b',
+  },
+  volcano: {
+    id: 'volcano',
+    label: 'Volcano',
+    blurb: 'Basalt shelves · distant lava glow',
+    sky: ['#1d1720', '#442626', '#8a4a2c'],
+    fog: '#3b2a28',
+    fogDensity: 0.011,
+    hemi: { sky: '#c4bcc8', ground: '#3a2420', intensity: 1.05 },
+    sun: { color: '#ffc49a', intensity: 2.2, dir: [-0.45, 0.8, 0.5] },
+    rim: { color: '#ff7a3a', intensity: 1.4 },
+    wall: ['#35343d', '#2f2e37', '#3b3a44', '#2a2931'],
+    block: ['#4b4749', '#423e41', '#56504f', '#3e3a3c'],
+    cap: '#7a716d',
+    capKind: 'ash',
+    mountain: '#2d2427',
+    mountainTop: '#ff6a1a',
+    ground: '#5a4f4b',
+    groundRock: '#403a3a',
+    tree: '#2a211f',
+    treeKind: 'dead',
+    accent: '#ff7a2a',
+    rail: '#2e3035',
+    particles: { kind: 'embers', color: '#ff9a3c' },
+    window: '#ff8a3c',
+    lava: '#ff6a1a',
+  },
+};
+
+export function themeInfo(id) {
+  return THEME_INFO[id] || THEME_INFO.ice;
+}

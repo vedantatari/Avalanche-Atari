@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f6f0e4" />
+    <meta name="description" content="Avalanche: catch marked rocks breaking off the cliff, dodge fire, bank shields." />
+    <title>Avalanche</title>
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./css/styles.css" />
+  </head>
+  <body>
+    <!-- Icon sprite -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3Z" fill="#4a9cf0" stroke="#dcefff" stroke-width="1.4" stroke-linejoin="round"/><path d="M12 5.2 7 7.1v4c0 3.2 2.1 6 5 7.2Z" fill="#8cc8ff"/></symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.6-9.3C.9 8.3 3 4.5 6.7 4.5c2.2 0 3.7 1.2 5.3 3 1.6-1.8 3.1-3 5.3-3 3.7 0 5.8 3.8 4.3 7.2C19.5 16.4 12 21 12 21Z"/><path d="M7 7.5c-1.5.2-2.3 1.6-2 3" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.6" stroke-linecap="round"/></symbol>
+      <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M12 13.5V9.5M9.5 2.8h5M12 2.8V6M18.2 6.6l1.4-1.4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></symbol>
+      <symbol id="i-left" viewBox="0 0 32 24"><path d="M3 12h26M12 3 3 12l9 9" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-right" viewBox="0 0 32 24"><path d="M3 12h26M20 3l9 9-9 9" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#3b8fe8" stroke="#fff" stroke-width="2"/><path d="m7 12.5 3.2 3.2L17.5 8.5" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+      <!-- Atari Fuji mark: paths from Wikimedia Commons "Atari Official 2012 Logo.svg" (Atari trademark). -->
+      <symbol id="i-fuji" viewBox="36 22 228 186"><path d="M91.9,180.9c10.8-9.2,20.5-20.2,26.7-33.1c3.8-8.1,6.8-16.5,8.3-25.3c2.1-12.7,2.9-25.6,3.6-38.5 c0.4-8.9,0.6-17.8,0.6-26.8V25.1h-13.7c0,5.3,0,10.6,0,15.9c-0.4,15.7-1.3,31.4-3.7,46.9c-1.9,12.2-4.6,24.4-9.7,35.6 c-4.4,9.8-10.1,19.1-17.3,27c-7,7.8-15.3,14.3-24.5,19.2c-7.8,4.1-16.2,7.2-24.9,8.5v26.9c7.2-1,14.3-2.8,21.2-5.2 C70.5,195.7,82.2,189.5,91.9,180.9z"/><path d="M136.4,147.8c0,19.1-0.1,38.3,0.1,57.4c8.3-0.1,16.7,0,25.1,0v-180c-8.4,0-16.8,0-25.2,0 C136.4,66,136.4,106.9,136.4,147.8z"/><path d="M250.1,175.7c-12.6-4.1-24.2-11-33.8-20.2c-10-9.5-17.7-21.4-23-34.1c-5.6-13.2-8.1-27.4-9.9-41.5 c-2.2-18.2-2.8-36.5-2.7-54.8h-13.6v29.5c-0.1,17.4,0.5,34.8,2,52.1c0.8,8,1.7,16.1,3.8,23.9s5.2,15.3,9.2,22.4 c5.1,9,11.9,17,19.5,24.1c4.6,4.2,9.4,8.3,14.7,11.7c7.2,4.7,15.1,8.4,23.3,11.2c6.9,2.3,13.9,4.2,21.1,5.1c0-9,0-17.9,0-26.9 C257.2,177.7,253.6,176.8,250.1,175.7z"/></symbol>
+    </svg>
+
+    <div class="page" id="page">
+
+      <main class="stage-wrap">
+        <section class="frame" id="frame" aria-label="Avalanche game" data-hud="wide">
+          <div class="scene" id="scene"></div>
+
+          <div class="hud-top" id="hud-top">
+            <div class="pill level-pill"><span class="lbl">LEVEL</span><b id="hud-level">01</b></div>
+            <div class="pill score-pill" id="score-pill" aria-label="Score">
+              <div class="score-text"><b id="hud-score">0</b><span class="score-target">/ <span id="hud-target">500</span></span><span class="mult-chip" id="hud-mult" hidden>×2</span></div>
+              <div class="bar" aria-hidden="true">
+                <div class="bar-fill" id="hud-bar">
+                  <span class="bar-gems"><i class="g1"></i><i class="g2"></i><i class="g3"></i><i class="g4"></i><i class="g5"></i><i class="g6"></i></span>
+                </div>
+              </div>
+              <span class="gem-cap left" aria-hidden="true"><i class="gem gold"></i><i class="gem red"></i></span>
+              <span class="gem-cap right" aria-hidden="true"><i class="gem purple"></i><i class="gem gold"></i><i class="gem green"></i></span>
+            </div>
+            <div class="pill timer-pill" id="timer-pill" aria-label="Time left">
+              <svg class="ico" aria-hidden="true"><use href="#i-timer" /></svg><b id="hud-time">01:00</b>
+            </div>
+            <div class="pill hearts-pill" id="hud-hearts" role="img" aria-label="3 of 3 hearts">
+              <svg class="heart"><use href="#i-heart" /></svg><svg class="heart"><use href="#i-heart" /></svg><svg class="heart"><use href="#i-heart" /></svg>
+            </div>
+            <button class="pill icon-btn" id="btn-hud-fullscreen" type="button" data-fullscreen aria-label="Full screen" hidden>
+              <svg class="ico" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label sr-only">Full screen</span>
+            </button>
+            <button class="pill icon-btn" id="btn-pause" type="button" aria-label="Pause">
+              <svg class="ico" aria-hidden="true"><use href="#i-pause" /></svg>
+            </button>
+          </div>
+
+          <div class="toast-layer" id="toasts" aria-live="polite"></div>
+          <div class="sr-only" id="announcer" aria-live="assertive"></div>
+
+          <div class="hud-bottom" id="hud-bottom">
+            <div class="bank-pill" id="bank-pill" aria-label="Shield bank">
+              <svg class="ico shield" aria-hidden="true"><use href="#i-shield" /></svg>
+              <span class="lbl">BANK</span><b id="hud-bank">0</b>
+            </div>
+            <div class="restore-group">
+              <button class="restore-btn" id="btn-restore" type="button" aria-describedby="restore-note">
+                <svg class="ico heart" aria-hidden="true"><use href="#i-heart" /></svg>
+                <span class="restore-label">RESTORE</span><span class="restore-cost" id="hud-cost"><span class="dot">•</span> 1 <span class="unit">SHIELD</span></span>
+              </button>
+              <div class="used" id="hud-used">0 / 4 <span class="unit">USED</span></div>
+              <div class="restore-note" id="restore-note">Hearts full</div>
+            </div>
+          </div>
+
+          <!-- Stage intro -->
+          <div class="intro-banner" id="intro-banner" hidden>
+            <div class="intro-level" id="intro-level">LEVEL 01</div>
+            <div class="intro-goal" id="intro-goal">Reach 500 in 1:00</div>
+            <div class="intro-ready">Get ready…</div>
+          </div>
+
+          <!-- Menu -->
+          <div class="overlay" id="ov-menu" hidden>
+            <div class="card menu-card">
+              <div class="menu-brand" aria-label="Atari">
+                <svg aria-hidden="true"><use href="#i-fuji" /></svg><span>ATARI</span>
+              </div>
+              <h1 class="title">AVALANCHE</h1>
+              <p class="tagline">Catch the marked rocks. Dodge the fire.</p>
+              <button class="btn resume-run" id="btn-resume-run" type="button" hidden>Resume run <span class="sub" id="resume-note">Level 1</span></button>
+              <button class="btn primary big" id="btn-play" type="button">Play <span class="sub">Level <span id="menu-level">1</span></span></button>
+              <div class="level-stepper">
+                <button class="btn square" id="btn-level-prev" type="button" aria-label="Previous level">‹</button>
+                <button class="btn" id="btn-levels" type="button">All levels</button>
+                <button class="btn square" id="btn-level-next" type="button" aria-label="Next level">›</button>
+              </div>
+              <div class="menu-row modes-row">
+                <button class="btn" id="btn-endless" type="button">Endless</button>
+                <button class="btn" id="btn-daily" type="button">Daily<span class="sub" id="daily-note"></span></button>
+                <button class="btn" id="btn-scores" type="button">Scores</button>
+              </div>
+              <div class="menu-terrain">
+                <div class="section-label">Terrain</div>
+                <div class="terrain-cards compact" id="menu-terrain" role="radiogroup" aria-label="Terrain"></div>
+              </div>
+              <div class="menu-legend">
+                <div class="legend" id="legend"></div>
+                <p class="legend-foot">Revive cost: 1 → 2 → 4 → 8 shields · Max 4 per run</p>
+              </div>
+              <div class="menu-row">
+                <button class="btn" id="btn-howto" type="button">How to play</button>
+                <button class="btn" id="btn-settings" type="button">Settings</button>
+              </div>
+              <button class="btn fullscreen-btn" id="btn-fullscreen" type="button" data-fullscreen hidden>
+                <svg class="fs-icon" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label">Full screen</span>
+              </button>
+              <p class="menu-note" id="menu-note" hidden></p>
+            </div>
+          </div>
+
+          <!-- Level select -->
+          <div class="overlay" id="ov-levels" hidden>
+            <div class="card levels-card">
+              <div class="card-head">
+                <h2>Choose level</h2>
+                <button class="btn" type="button" data-close>Back</button>
+              </div>
+              <div class="level-pages" id="level-pages" role="tablist" aria-label="Level pages"></div>
+              <div class="level-grid" id="level-grid"></div>
+              <p class="hint" id="levels-hint">Clear a level to unlock the next. Best scores and stars count on every terrain.</p>
+            </div>
+          </div>
+
+          <!-- Settings -->
+          <div class="overlay" id="ov-settings" hidden>
+            <div class="card settings-card">
+              <div class="card-head">
+                <h2>Settings</h2>
+                <button class="btn" type="button" data-close>Back</button>
+              </div>
+              <label class="toggle"><input type="checkbox" id="set-sound" /><span>Sound effects</span></label>
+              <label class="toggle"><input type="checkbox" id="set-music" /><span>Music &amp; ambience</span></label>
+              <div class="setting-group volume-group">
+                <div class="section-label">Volume</div>
+                <label class="slider"><span>Master</span><input type="range" id="set-master-vol" min="0" max="100" step="5" aria-label="Master volume" /></label>
+                <label class="slider"><span>Effects</span><input type="range" id="set-sfx-vol" min="0" max="100" step="5" aria-label="Sound effects volume" /></label>
+                <label class="slider"><span>Music</span><input type="range" id="set-music-vol" min="0" max="100" step="5" aria-label="Music volume" /></label>
+              </div>
+              <label class="toggle"><input type="checkbox" id="set-motion" /><span>Reduced motion <small>(no shake, calm background, fewer particles)</small></span></label>
+              <label class="toggle"><input type="checkbox" id="set-follow" /><span>Cart follows the mouse <small>(hover to steer; drag and keys always work)</small></span></label>
+              <div class="setting-group">
+                <div class="section-label">Difficulty <small>(applies from the next stage)</small></div>
+                <div class="segmented" id="set-difficulty" role="radiogroup" aria-label="Difficulty">
+                  <button type="button" data-value="easy">Easy</button>
+                  <button type="button" data-value="normal">Normal</button>
+                  <button type="button" data-value="hard">Hard</button>
+                </div>
+              </div>
+              <div class="setting-group">
+                <div class="section-label">Graphics</div>
+                <div class="segmented" id="set-quality" role="radiogroup" aria-label="Graphics quality">
+                  <button type="button" data-value="auto">Auto</button>
+                  <button type="button" data-value="high">High</button>
+                  <button type="button" data-value="medium">Medium</button>
+                  <button type="button" data-value="low">Low</button>
+                </div>
+              </div>
+              <div class="setting-group">
+                <div class="section-label">Renderer</div>
+                <div class="segmented" id="set-renderer" role="radiogroup" aria-label="Renderer">
+                  <button type="button" data-value="auto">Auto</button>
+                  <button type="button" data-value="3d">3D</button>
+                  <button type="button" data-value="2d">Simple 2D</button>
+                </div>
+                <p class="hint" id="renderer-status"></p>
+              </div>
+              <button class="btn danger" id="btn-reset" type="button">Reset progress…</button>
+              <p class="hint" id="storage-status"></p>
+            </div>
+          </div>
+
+          <!-- How to play / first-play tutorial -->
+          <div class="overlay" id="ov-howto" hidden>
+            <div class="card howto-card">
+              <div class="card-head">
+                <h2 id="howto-title">How to play</h2>
+              </div>
+              <p class="howto-intro">Rocks crack loose from the cliff. Steer the cart so the <b>teal scoop</b> catches the good ones — and let the bad ones fall.</p>
+              <div class="howto-grid" id="howto-grid"></div>
+              <div class="howto-controls">
+                <div><b>Move</b> point with the mouse (the cart follows) · ← → or A / D · drag the scene · on phones and tablets, touch and hold the left or right half of the screen</div>
+                <div><b>Restore a heart</b> R or the Restore button (costs 1 → 2 → 4 → 8 banked shields, max 4 per run)</div>
+                <div><b>Pause</b> Esc or P · <b>Full screen</b> F</div>
+                <div><b>Win</b> reach the target score and still have a heart when the timer ends.</div>
+              </div>
+              <div class="card-actions">
+                <button class="btn primary" id="btn-howto-ok" type="button">Got it</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pause -->
+          <div class="overlay" id="ov-pause" hidden>
+            <div class="card pause-card">
+              <h2>Paused</h2>
+              <p class="hint" id="pause-note" hidden></p>
+              <button class="btn primary big" id="btn-resume" type="button">Resume</button>
+              <div class="menu-row">
+                <button class="btn" id="btn-restart" type="button">Restart</button>
+                <button class="btn" id="btn-pause-menu" type="button">Menu</button>
+              </div>
+              <div class="menu-row">
+                <label class="toggle compact"><input type="checkbox" id="pause-sound" /><span>Sound</span></label>
+                <label class="toggle compact"><input type="checkbox" id="pause-music" /><span>Music</span></label>
+              </div>
+              <div class="menu-row">
+                <button class="btn" id="btn-pause-howto" type="button">How to play</button>
+                <button class="btn fullscreen-btn" id="btn-pause-fullscreen" type="button" data-fullscreen hidden>
+                  <svg class="fs-icon" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label">Full screen</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Revive decision -->
+          <div class="overlay" id="ov-revive" hidden>
+            <div class="card revive-card">
+              <h2>Out of hearts!</h2>
+              <p class="revive-q">Restore a life?</p>
+              <div class="revive-stats">
+                <div><span>Cost</span><b id="revive-cost">1</b><small>shields</small></div>
+                <div><span>Bank</span><b id="revive-bank">0</b><small>shields</small></div>
+                <div><span>Uses left</span><b id="revive-left">4</b><small>of 4</small></div>
+              </div>
+              <p class="hint">The game is paused. Take your time.</p>
+              <div class="card-actions">
+                <button class="btn primary" id="btn-revive-yes" type="button">Restore life</button>
+                <button class="btn" id="btn-revive-no" type="button">End run</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage result -->
+          <div class="overlay" id="ov-result" hidden>
+            <div class="card result-card">
+              <h2 id="result-title">Stage clear!</h2>
+              <div class="result-stars" id="result-stars" hidden></div>
+              <p class="result-sub" id="result-sub"></p>
+              <div class="result-stats">
+                <div><span>Score</span><b id="result-score">0</b></div>
+                <div id="result-target-box"><span>Target</span><b id="result-target">0</b></div>
+                <div><span>Best</span><b id="result-best">0</b></div>
+                <div id="result-lost-box"><span>Lives lost</span><b id="result-lost">0</b></div>
+                <div id="result-combo-box" hidden><span>Best streak</span><b id="result-combo">0</b></div>
+              </div>
+              <div class="result-caught" id="result-caught" aria-label="Caught items"></div>
+              <p class="hint" id="result-unlock" hidden></p>
+              <div class="card-actions">
+                <button class="btn primary" id="btn-next" type="button">Next level</button>
+                <button class="btn" id="btn-retry" type="button">Retry</button>
+                <button class="btn" id="btn-result-menu" type="button">Menu</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- High scores -->
+          <div class="overlay" id="ov-scores" hidden>
+            <div class="card scores-card">
+              <div class="card-head">
+                <h2>High scores</h2>
+                <button class="btn" type="button" data-close>Back</button>
+              </div>
+              <div class="scores-summary" id="scores-summary"></div>
+              <ol class="scores-list" id="scores-list"></ol>
+              <p class="hint" id="scores-empty" hidden>No finished runs yet — endless runs, daily challenges, and lost or completed campaigns land here.</p>
+            </div>
+          </div>
+
+          <!-- Confirm reset -->
+          <div class="overlay" id="ov-confirm" hidden>
+            <div class="card confirm-card" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+              <h2 id="confirm-title">Reset all progress?</h2>
+              <p id="confirm-text">This locks every level except level 1 and clears best scores, stars, high scores, and any saved run. Settings and terrain are kept. This cannot be undone.</p>
+              <div class="card-actions">
+                <button class="btn" id="btn-confirm-no" type="button">Cancel</button>
+                <button class="btn danger" id="btn-confirm-yes" type="button">Reset progress</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Graphics context lost -->
+          <div class="overlay" id="ov-context" hidden>
+            <div class="card">
+              <h2>Graphics paused</h2>
+              <p>The browser reset the 3D graphics. Your run is saved in memory.</p>
+              <div class="card-actions">
+                <button class="btn primary" id="btn-context-retry" type="button">Try again</button>
+                <button class="btn" id="btn-context-2d" type="button">Use simple 2D</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="loading" id="loading"><div class="spinner" aria-hidden="true"></div><span>Loading…</span></div>
+        </section>
+      </main>
+    </div>
+
+    <noscript><p class="noscript">Avalanche needs JavaScript enabled.</p></noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

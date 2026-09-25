@@ -1,0 +1,9 @@
+three.js r186 (npm three@0.186.1), MIT licence (see LICENSE).
+
+three.module.min.js is the official ES module build (build/three.module.js + build/three.core.js)
+bundled into one file and minified once with rolldown. Nothing else was changed. To regenerate:
+
+  npm install three@0.186.1 --no-save
+  npx rolldown node_modules/three/build/three.module.js --format esm --minify \
+    --file vendor/three/three.module.min.js \
+    --banner "/** three.js r186 (npm three@0.186.1) | Copyright 2010-2026 Three.js Authors | SPDX-License-Identifier: MIT | minified with rolldown */"

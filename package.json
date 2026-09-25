@@ -1,0 +1,19 @@
+{
+  "name": "avalanche",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Avalanche-inspired browser arcade game in plain HTML/CSS/JavaScript (no build step). npm is only used for optional dev tools.",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "vitest run",
+    "e2e": "node scripts/e2e.mjs",
+    "e2e:edge": "node scripts/e2e.mjs --browser=edge",
+    "perf": "node scripts/perf.mjs",
+    "record": "node scripts/record.mjs docs/verification"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0",
+    "vitest": "5.0.1"
+  }
+}
