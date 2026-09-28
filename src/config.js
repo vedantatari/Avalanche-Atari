@@ -13,13 +13,13 @@ export const LOOP = {
 
 /** Logical playfield in world units. The gameplay plane sits at z = gameZ. */
 export const ARENA = {
-  halfWidth: 8,
+  halfWidth: 10,
   catchY: 0,
   /** Missed rocks break on the rail ledge once they fall below this height. */
   floorY: -1.05,
   gameZ: 0.8,
   /** Region of the gameplay plane that must always be visible (arena, cart, source shelves). */
-  frame: { minX: -8.7, maxX: 8.7, minY: -1.85, maxY: 10.25 },
+  frame: { minX: -10.7, maxX: 10.7, minY: -1.85, maxY: 10.25 },
   /** Share of spare vertical screen space placed above the arena (rest goes below). */
   extraSpaceAbove: 0.9,
   /** Fixed camera: height above the catch plane and distance in front of the gameplay plane. */
@@ -29,11 +29,11 @@ export const ARENA = {
 
 export const CART = {
   /** Base scoop width as a share of the arena width (same on every device). */
-  scoopWidthRatio: 0.16,
+  scoopWidthRatio: 0.1408,
   /** Seconds to cross the full travel range at top speed (was 1.2; faster on request). */
   traverseSeconds: 0.8,
   /** Keyboard / hold-button acceleration (world units per second squared). */
-  acceleration: 240,
+  acceleration: 307,
   /** Scoop width tween speed (world units per second) so edge clamping never jumps. */
   widthChangeRate: 10,
   /** Depth of the scoop tub below its rim. A rock touching the tub's side also counts. */
@@ -42,9 +42,10 @@ export const CART = {
 
 export const ROCK = {
   /** Logical half-size of a falling rock (matches the visible block) used for touching and spacing. */
-  radius: 0.42,
+  radius: 0.462,
+  blockScale: 1.1,
   /** Falling rocks shrink to this share of the shelf-block size once they detach. */
-  fallingScale: 0.6,
+  fallingScale: 0.63,
   /**
    * Falling boxes are stretched slightly wider than tall (a card-like aspect ratio) so the
    * embedded marking gets more room; the emblem itself is kept round by the renderers.
@@ -61,11 +62,11 @@ export const ROCK = {
 
 /** Source shelves near the cliff top. Rows further back sit higher. */
 export const CLIFF = {
-  columnSpacing: 1.44,
+  columnSpacing: 1.584,
   rows: [
-    { y: 7.3, z: -0.6, columns: 11 },
-    { y: 8.4, z: -1.55, columns: 10 },
-    { y: 9.5, z: -2.5, columns: 11 },
+    { y: 7.3, z: -0.6, columns: 13 },
+    { y: 8.4, z: -1.55, columns: 12 },
+    { y: 9.5, z: -2.5, columns: 13 },
   ],
   /** Seconds a hole stays empty before a replacement rock slides in. */
   refillDelay: 3.2,
@@ -90,6 +91,12 @@ export const EFFECTS = {
   cloneSeconds: 5,
   cloneGap: 1.3,
   cloneOpacity: 0.7,
+  /** Magnet: helpful rocks this far beyond the scoop's normal reach are pulled in as well. */
+  magnetSeconds: 5,
+  magnetReach: 2.45,
+  /** Frost: the cart's top speed drops to this share while its wheels are frozen. */
+  frostSeconds: 4,
+  frostSpeedFactor: 0.5,
   hitImmunitySeconds: 1,
   restoreImmunitySeconds: 1,
 };
@@ -109,7 +116,29 @@ export const ITEM_EFFECTS = {
   mult3: { polarity: 'positive', multiplier: 3 },
   mult5: { polarity: 'positive', multiplier: 5 },
   clone: { polarity: 'positive', clone: true },
+  /** Breaks in two mid-fall (see SPLIT); each half is its own scoring rock. */
+  split: { polarity: 'positive', score: 40 },
+  magnet: { polarity: 'positive', magnet: true },
+  /** Resolves to a seeded surprise when caught (see MYSTERY). It never costs a heart. */
+  mystery: { polarity: 'positive', mystery: true },
+  frost: { polarity: 'negative', frost: true },
 };
+
+/**
+ * Mystery rock: its outcome is drawn when the stage is generated (so replays and the daily
+ * match) and revealed on the catch. Weighted; never fire or the demon.
+ */
+export const MYSTERY = {
+  jackpot: 250,
+  outcomes: { jackpot: 30, shield: 14, expand: 12, mult3: 10, magnet: 8, clone: 6, shrink: 10, reverse: 5, frost: 5 },
+};
+
+/**
+ * Split rock: breaks in two at `at` of its fall; the halves reach their landing spots,
+ * `offset` either side of the source column, at `settle` of the fall. 2 × offset stays under
+ * the scoop's reach, so a centred cart can take both halves.
+ */
+export const SPLIT = { at: 0.35, settle: 0.7, offset: 0.8 };
 
 /** Relative drop weights, normalised over the types enabled at a level. Weight 0 = never in the bag (the demon is scheduled on its own clock instead). */
 export const SPAWN_WEIGHTS = {
@@ -125,9 +154,16 @@ export const SPAWN_WEIGHTS = {
   mult3: 3,
   mult5: 2,
   clone: 4,
+  split: 5,
+  magnet: 3,
+  mystery: 4,
+  frost: 4,
 };
 
-/** First level at which each type can drop. */
+/**
+ * First level at which each type can drop, on the difficulty scale (level + difficultyOffset):
+ * the four newer rocks arrive during the first campaign levels (2, 3, 5, and 8).
+ */
 export const TYPE_UNLOCK_LEVEL = {
   coin: 1,
   cash: 1,
@@ -141,6 +177,48 @@ export const TYPE_UNLOCK_LEVEL = {
   mult3: 1,
   mult5: 1,
   clone: 1,
+  split: 16,
+  magnet: 17,
+  mystery: 19,
+  frost: 22,
+};
+
+/**
+ * Terrain rules: each terrain changes one mechanic (its look lives in render/themes.js).
+ * Ice: a slippery rail — the cart speeds up, brakes, and turns with less grip and glides on
+ * after input stops (top speed is unchanged). Volcano: heat vents push some rocks sideways as
+ * they fall; every pushed landing spot is re-checked against the fairness rules.
+ */
+export const TERRAIN_RULES = {
+  ice: {
+    rule: 'Slippery rail',
+    blurb: 'The cart glides on after you let go',
+    /** World units per second squared: speeding up, coasting to a stop, and braking/turning. */
+    grip: { accel: 153, friction: 96, brake: 230 },
+    /** Reachable-score routes assume this share of the usual route speed (sluggish turns). */
+    reachFactor: 0.92,
+  },
+  volcano: {
+    rule: 'Heat vents',
+    blurb: 'Hot updrafts push some rocks sideways',
+    /** Chance that a rock is pushed, and how far (world units). */
+    drift: { chance: 0.5, min: 0.9, max: 1.8 },
+  },
+};
+
+/** Sideways drift (heat vents, wind) runs between these shares of a fall, so rocks land straight. */
+export const DRIFT = { from: 0.15, to: 0.8, maxShift: 2.6 };
+
+/**
+ * Stage modifiers. Campaign levels whose number ends in `digit` carry one (from `fromLevel`);
+ * endless waves and the daily inherit their level's modifier. `targetScale` eases the target
+ * where the modifier makes routes harder than the reachable-score model assumes.
+ */
+export const MODIFIERS = {
+  windy: { label: 'Windy', blurb: 'Every rock drifts with the wind', digit: 4, fromLevel: 4, wind: { min: 0.7, max: 1.3 }, targetScale: 0.95 },
+  /** Rocks show their markings only once they fall below `line` (world height). */
+  fog: { label: 'Fog', blurb: 'Rocks show their markings only below the fog', digit: 7, fromLevel: 7, line: 4.4, targetScale: 0.92 },
+  goldRush: { label: 'Gold rush', blurb: 'More gold and emeralds — and more fire', digit: 9, fromLevel: 9, weights: { coin: 1.5, cash: 2, fire: 1.35 } },
 };
 
 /**
@@ -163,6 +241,22 @@ export const DIFFICULTY_MODES = {
 };
 
 /** The demon: a scheduled hazard outside the weighted bag. Touching it ends the run. */
+export const STORM = {
+  fromLevel: 20,
+  width: 0.35,
+  counts: [
+    { fromLevel: 20, min: 2, max: 3 },
+    { fromLevel: 50, min: 4, max: 5 },
+    { fromLevel: 80, min: 5, max: 6 },
+  ],
+  firstAt: 4,
+  endMargin: 1,
+  warnSeconds: 2,
+  strikeSeconds: 3,
+  calmSeconds: 1,
+  targetPerStorm: 0.015,
+};
+
 export const DEMON = {
   /** Seconds between demon spawns within a stage (the first comes this long in). */
   everySeconds: 12,
@@ -191,7 +285,7 @@ export const DIFFICULTY = {
   /** Seconds between drops: exponential approach from start toward min as level rises. */
   dropInterval: { start: 0.6, min: 0.26, levelScale: 30 },
   /** Source-to-scoop travel time. */
-  fallSeconds: { start: 2.5, min: 1.3, levelScale: 35 },
+  fallSeconds: { start: 2.86, min: 1.15, levelScale: 25 },
   /** +/- share of random variation applied to each drop interval. */
   intervalJitter: 0.18,
   /** Visible crack/shake before a rock detaches. */
@@ -237,7 +331,7 @@ export const QUALITY = {
   high: { dprCap: 2, shadows: true, shadowMapSize: 2048, particleScale: 1, ambientParticles: 320 },
   medium: { dprCap: 1.5, shadows: true, shadowMapSize: 1024, particleScale: 0.7, ambientParticles: 180 },
   low: { dprCap: 1, shadows: false, shadowMapSize: 512, particleScale: 0.4, ambientParticles: 50 },
-  adaptive: { sampleFrames: 120, downgradeMs: 25, upgradeMs: 13, cooldownSeconds: 4 },
+  adaptive: { sampleFrames: 120, downgradeMs: 21, upgradeMs: 13, cooldownSeconds: 4, holdSeconds: 45 },
 };
 
 export const THEMES = ['ice', 'volcano'];

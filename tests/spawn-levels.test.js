@@ -56,11 +56,16 @@ describe('levels', () => {
     }
   });
 
-  it('drops every rock type from level 1 (shrink and reverse used to wait for levels 3 and 5)', () => {
-    expect(enabledItemTypes(1)).toEqual(ITEM_TYPES.filter((t) => SPAWN_WEIGHTS[t] > 0));
+  it('drops every classic rock type from level 1; the newer rocks arrive over levels 2–8', () => {
+    const NEWER = ['split', 'magnet', 'mystery', 'frost'];
+    const classic = ITEM_TYPES.filter((t) => SPAWN_WEIGHTS[t] > 0 && !NEWER.includes(t));
+    expect(enabledItemTypes(1)).toEqual(classic);
     expect(enabledItemTypes(1)).toContain('shrink');
     expect(enabledItemTypes(1)).toContain('reverse');
-    for (let level = 1; level <= 10; level++) expect(typesIntroducedAt(level)).toEqual([]);
+    const introduced = {};
+    for (let level = 1; level <= 10; level++) for (const t of typesIntroducedAt(level)) introduced[t] = level;
+    expect(introduced).toEqual({ split: 2, magnet: 3, mystery: 5, frost: 8 });
+    expect(enabledItemTypes(8)).toEqual(ITEM_TYPES.filter((t) => SPAWN_WEIGHTS[t] > 0));
   });
 });
 
@@ -82,7 +87,9 @@ describe('spawn director', () => {
       const s = generateStageSchedule(level, 42);
       for (const d of s.drops) {
         expect(Math.abs(d.x) + ROCK.radius).toBeLessThanOrEqual(ARENA.halfWidth);
-        expect(cells[d.cellId].x).toBe(d.x);
+        // Split halves leave their cell's column mid-fall; everything else lands under it.
+        expect(cells[d.cellId].x).toBe(d.x0 ?? d.x);
+        if (d.x0 === undefined) expect(d.x).toBe(cells[d.cellId].x);
         expect(cells[d.cellId].y).toBe(d.y0);
         expect(d.arriveAt).toBeLessThanOrEqual(s.duration);
         expect(d.detachAt - d.crackAt).toBeGreaterThanOrEqual(DIFFICULTY.crackSeconds.min - 1e-9);
@@ -97,7 +104,8 @@ describe('spawn director', () => {
     for (const level of [1, 30, 100]) {
       const { drops } = generateStageSchedule(level, 8);
       const byCell = new Map();
-      for (const d of drops) {
+      // The two halves of a split rock leave one cell together, as one rock.
+      for (const d of drops.filter((x) => x.half !== 1)) {
         const prev = byCell.get(d.cellId);
         if (prev) expect(d.crackAt).toBeGreaterThanOrEqual(prev.refillEndAt - 1e-9);
         byCell.set(d.cellId, d);
@@ -182,10 +190,17 @@ describe('spawn director', () => {
     for (const n of thirds) expect(n / xs.length).toBeGreaterThan(0.2);
   });
 
-  it('is independent of theme and screen: schedules depend on (level, seed) only', () => {
+  it('terrain never changes which rocks fall, from where, or when — heat vents only move landings', () => {
     expect(generateStageSchedule.length).toBe(2);
-    const once = generateStageSchedule(33, 9);
-    expect(once.drops.length).toBeGreaterThan(100);
+    const plain = generateStageSchedule(33, 9);
+    expect(plain.drops.length).toBeGreaterThan(100);
+    const ice = generateStageSchedule(33, 9, { terrain: 'ice' });
+    const volcano = generateStageSchedule(33, 9, { terrain: 'volcano' });
+    const shape = (s) => s.drops.map((d) => [d.id, d.type, d.cellId, d.crackAt, d.detachAt, d.arriveAt]);
+    expect(shape(ice)).toEqual(shape(plain));
+    expect(shape(volcano)).toEqual(shape(plain));
+    expect(ice.drops.map((d) => d.x)).toEqual(plain.drops.map((d) => d.x));
+    expect(volcano.drops.some((d, i) => d.x !== plain.drops[i].x)).toBe(true);
   });
 
   it('computes safe gaps between hazards', () => {

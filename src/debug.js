@@ -3,7 +3,7 @@
 // Exposes window.__avalanche for reproducible checks and browser automation.
 import { PHASE } from './game/simulation.js';
 import { cliffCells, fallProfile } from './game/cliff.js';
-import { CLIFF } from './config.js';
+import { CLIFF, SPLIT } from './config.js';
 
 export function installDebug(app, params) {
   let injected = 0;
@@ -32,12 +32,16 @@ export function installDebug(app, params) {
         bank: sim.run?.bank ?? null,
         restoresUsed: sim.run?.restoresUsed ?? null,
         seed: sim.run?.seed ?? null,
+        terrain: sim.run?.terrain ?? null,
+        modifier: st?.modifier ?? null,
         cartX: sim.cart?.x ?? 0,
+        cartV: sim.cart?.v ?? 0,
         scoopWidth: sim.cart?.width ?? null,
         reversed: st ? sim.isReversed() : false,
         effects: st ? sim.effectTimers() : null,
         falling: st ? st.falling.map((d) => ({ id: d.id, type: d.type, x: d.x, arriveAt: d.arriveAt })) : [],
         caught: st ? { ...st.caught } : null,
+        trophies: Object.keys(app.store.data.achievements),
         renderer: app.renderer?.kind,
         quality: app.activeQuality,
         fps: Math.round(app.perf.fps),
@@ -58,8 +62,11 @@ export function installDebug(app, params) {
       if (bank !== undefined && sim.run) sim.run.bank = bank;
       if (lives !== undefined && sim.run) sim.run.lives = lives;
     },
-    /** Test helper: schedule one extra rock that arrives above `x` after `fall` seconds. */
-    injectDrop(type, x, fall = 1.6) {
+    /**
+     * Test helper: schedule one extra rock that arrives above `x` after `fall` seconds. A
+     * 'split' adds both halves (landing either side of x); a 'mystery' reveals `opts.reveal`.
+     */
+    injectDrop(type, x, fall = 1.6, opts = {}) {
       const sim = app.sim;
       const st = sim.stage;
       if (!st) return null;
@@ -85,10 +92,16 @@ export function installDebug(app, params) {
         refillEndAt: detachAt + CLIFF.refillDelay + CLIFF.refillSeconds,
         pattern: 'debug',
       };
+      if (type === 'mystery') drop.reveal = opts.reveal || 'jackpot';
+      const added = [drop];
+      if (type === 'split') {
+        Object.assign(drop, { x: x - SPLIT.offset, x0: x, driftStart: detachAt + fall * SPLIT.at, driftEnd: detachAt + fall * SPLIT.settle, half: -1, pair: drop.id });
+        added.push({ ...drop, id: 1e6 + injected++, x: x + SPLIT.offset, half: 1 });
+      }
       const drops = st.schedule.drops;
       let i = st.nextCrack;
       while (i < drops.length && drops[i].crackAt <= crackAt) i++;
-      drops.splice(i, 0, drop);
+      drops.splice(i, 0, ...added);
       return drop.id;
     },
     /** Test helper: remove upcoming scheduled rocks so a scenario runs in isolation. */

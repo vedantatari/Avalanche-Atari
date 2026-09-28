@@ -12,14 +12,6 @@ resized. Themes and item types tint the detail maps in code.
 | `cliff_detail.jpg`, `cliff_normal.jpg` | [Rock Face 03](https://polyhaven.com/a/rock_face_03) | Poly Haven |
 | `snow_normal.jpg` | [Snow 02](https://polyhaven.com/a/snow_02) | Poly Haven |
 
-## Atari mark
-
-`assets/atari-logo.svg` is "Atari Official 2012 Logo.svg" from
-[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Atari_Official_2012_Logo.svg)
-(listed as public domain, trademarked). The header uses the Fuji symbol paths from this file,
-inlined in `index.html`. "Atari" and the Fuji symbol are trademarks of Atari; replace them with
-the official brand asset files if your brand guidelines require it.
-
 ## Everything else
 
 Rocks, cliffs, trees, the cart, the driver, emblems, particles, sounds, and UI icons are

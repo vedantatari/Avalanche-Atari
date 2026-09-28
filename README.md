@@ -3,7 +3,8 @@
 An Avalanche-inspired arcade game in plain HTML, CSS, and JavaScript — no build step, no backend, no
 runtime downloads. Rocks crack out of a snowy cliff; steer the miner's mine cart so its open tub
 catches the good rocks and lets the harmful ones fall, across a 100-level campaign (Ice and Volcano
-terrains), an Endless mode, and a seeded Daily challenge.
+terrains, each with its own rule, plus windy, foggy, and gold-rush stages), an Endless mode, a seeded
+Daily challenge, and 27 trophies. It installs as an app and plays offline.
 
 **Gameplay documentation** — the problem statement, game flow, rules, and a new-player tutorial — is
 in [gameflow.md](gameflow.md). This file covers setting the project up, the folder structure, and
@@ -37,14 +38,17 @@ Three.js in `vendor/three/`. If you only want to play, you can skip step 2 entir
 ```
 Avlanche-Atari/
 ├── index.html                  page shell, HUD, and overlay screens (DOM)
+├── manifest.webmanifest        PWA manifest (name, icons, full-screen display)
+├── sw.js                       service worker: network-first, caches the game for offline play
 ├── css/
 │   └── styles.css              full-window layout, HUD modes (wide/mid/compact/short), overlays
 ├── src/
-│   ├── main.js                 app controller: flow, pause, revive, storage, renderer selection
+│   ├── main.js                 app controller: flow, pause, revive, storage, renderer, haptics, PWA
 │   ├── config.js               central tuning — every gameplay number lives here
-│   ├── ui.js                   menus, overlays, HUD updates
+│   ├── ui.js                   menus, overlays (incl. trophies), HUD updates
+│   ├── achievements.js         trophy list and tracker (pure logic) + lifetime stats
 │   ├── audio.js                procedural Web Audio (no audio files)
-│   ├── storage.js              localStorage persistence (progress, settings, high scores)
+│   ├── storage.js              localStorage persistence (progress, settings, scores, trophies)
 │   ├── debug.js                ?debug URL facility for dev/tests
 │   ├── game/                   pure simulation, no DOM: simulation, spawn-director,
 │   │                           reachability, levels, items, cliff, loop (fixed 120 Hz step), rng
@@ -54,10 +58,12 @@ Avlanche-Atari/
 │                               geometry, projection, textures
 ├── vendor/
 │   └── three/                  Three.js r186 (MIT), one minified ES module — no CDN
-├── assets/                     favicon, Atari logo, CC0 textures (credits in assets/textures/CREDITS.md)
-├── tests/                      Vitest rule tests (82 tests)
-├── scripts/                    serve.mjs (local server), e2e.mjs (42 browser checks),
-│                               shots.mjs, perf.mjs, record.mjs, filmstrip.mjs
+├── assets/                     favicon, app icons (icons/), CC0 textures (credits in
+│                               assets/textures/CREDITS.md)
+├── tests/                      Vitest rule tests (116 tests)
+├── scripts/                    serve.mjs (local server), e2e.mjs (48 browser checks),
+│                               shots.mjs, perf.mjs, record.mjs, filmstrip.mjs,
+│                               pwa-icons.mjs (renders the app icons), sw-precache.mjs
 ├── docs/
 │   └── verification/           screenshots and a 10 s gameplay clip from the checks
 ├── .github/workflows/          GitHub Pages deployment (deploys the repo root as-is)
@@ -89,8 +95,9 @@ python -m http.server 8080
 npx serve .
 ```
 
-**Deploying** is the same idea: copy `index.html`, `css/`, `src/`, `vendor/`, and `assets/` to any
-static host (all paths are relative, so a subfolder works). The included GitHub Actions workflow
+**Deploying** is the same idea: copy `index.html`, `manifest.webmanifest`, `sw.js`, `css/`, `src/`,
+`vendor/`, and `assets/` to any static host (all paths are relative, so a subfolder works). Offline
+play and "install app" need HTTPS (or `localhost`). The included GitHub Actions workflow
 ([.github/workflows/deploy.yml](.github/workflows/deploy.yml)) publishes the repo to GitHub Pages on
 every push to `main`. `node_modules/`, `tests/`, `scripts/`, and `docs/` are dev-only.
 
@@ -98,10 +105,11 @@ every push to `main`. `node_modules/`, `tests/`, `scripts/`, and `docs/` are dev
 
 ```bash
 npm install                 # once — dev tools only
-npm test                    # 82 Vitest rule tests (simulation, modes, spawning, storage, loop, layout)
+npm test                    # 116 Vitest rule tests (simulation, terrains, weather, rocks, trophies,
+                            # spawning, storage, loop, layout, PWA files)
 
 node scripts/serve.mjs 8080 # keep a server running in another terminal, then:
-npm run e2e                 # 42 browser checks in your locally installed Chrome
+npm run e2e                 # 48 browser checks in your locally installed Chrome
 npm run e2e:edge            # same, in Edge
 npm run perf                # frame-time measurement
 npm run record              # captures a real gameplay clip into docs/verification/
@@ -110,6 +118,11 @@ npm run record              # captures a real gameplay clip into docs/verificati
 The browser scripts drive a locally installed Chrome or Edge through `playwright-core` — no browser
 download is needed.
 
+**Offline cache list**: `sw.js` precaches every game file. After adding or removing a file under
+`src/`, `css/`, `vendor/`, or `assets/`, run `node scripts/sw-precache.mjs` to regenerate the list
+(`npm test` fails while it is stale). `node scripts/pwa-icons.mjs` re-renders the app icons from
+`assets/favicon.svg`.
+
 **Debug facility** (dev/test only, not linked from the player UI): open the game with `?debug` in
 the URL. It shows an fps/phase/seed readout, exposes `window.__avalanche` for reproducible
 scenarios, and accepts `seed=<n>` (replay the same stages), `duration=<s>` (shorten stages),
@@ -117,9 +130,12 @@ scenarios, and accepts `seed=<n>` (replay the same stages), `duration=<s>` (shor
 
 **Where to change things**: nearly every gameplay number — timings, spawn weights, speeds, restore
 costs, difficulty curves, fairness margins, quality presets — lives in
-[src/config.js](src/config.js). Item effects ([src/game/items.js](src/game/items.js)) are separate
-from item appearance ([src/render/appearance.js](src/render/appearance.js)), terrain palettes are in
-[src/render/themes.js](src/render/themes.js), and background-life timing is `LIFE` in the config.
+[src/config.js](src/config.js) — including `TERRAIN_RULES` (ice grip, volcano heat vents),
+`MODIFIERS` (windy, fog, gold rush), `MYSTERY`, and `SPLIT`. Item effects
+([src/game/items.js](src/game/items.js)) are separate from item appearance
+([src/render/appearance.js](src/render/appearance.js)), terrain palettes are in
+[src/render/themes.js](src/render/themes.js), trophies are listed in
+[src/achievements.js](src/achievements.js), and background-life timing is `LIFE` in the config.
 
 ## License / credits
 

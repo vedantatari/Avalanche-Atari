@@ -2,6 +2,7 @@
 // the item rock that replaces it share the same geometry variant, so the rock that cracks is
 // visibly the same rock that falls. The reverse item shakes loose as a whiskey bottle instead.
 import * as THREE from '../../../vendor/three/three.module.min.js';
+import { ROCK } from '../../config.js';
 import { ITEM_TYPES } from '../../game/items.js';
 import { cliffCells } from '../../game/cliff.js';
 import { hashSeed } from '../../game/rng.js';
@@ -52,8 +53,8 @@ export class RockLibrary {
     const { blocks, caps } = blockGeometries();
     this.blocks = blocks;
     this.caps = caps;
-    this.emblemGeo = new THREE.PlaneGeometry(0.94, 0.94);
-    this.crackGeo = new THREE.PlaneGeometry(1.25, 1.1);
+    this.emblemGeo = new THREE.PlaneGeometry(0.94 * ROCK.blockScale, 0.94 * ROCK.blockScale);
+    this.crackGeo = new THREE.PlaneGeometry(1.25 * ROCK.blockScale, 1.1 * ROCK.blockScale);
     this.typeMats = {};
     this.emblemMats = {};
     this.tagMats = {};
@@ -77,7 +78,7 @@ export class RockLibrary {
         map: em,
         emissiveMap: em,
         emissive: new THREE.Color('#ffffff'),
-        emissiveIntensity: type === 'fire' || type === 'demon' ? 0.75 : 0.42,
+        emissiveIntensity: a.emblemGlow ?? 0.42,
         transparent: true,
         alphaTest: 0.04,
         roughness: 0.55,
@@ -90,6 +91,16 @@ export class RockLibrary {
       this.tagMats[type] = new THREE.SpriteMaterial({ map: tex(tag), transparent: true, depthWrite: false, fog: false });
       this.tagAspects[type] = tag.width / tag.height;
     }
+    // Arrow variants of the tags (for rocks a vent or the wind will push), built on first use.
+    this.arrowTags = new Map();
+    // Fog stages: an unmarked grey stone for rocks still above the fog line.
+    this.fogMat = new THREE.MeshStandardMaterial({
+      map: tex(veinCanvas('#8e9096', '#8e9096', hashSeed('fog-rock'), { detail: images.boulderDetail })),
+      normalMap: this.boulderNormal,
+      roughness: 0.9,
+      flatShading: true,
+      fog: false,
+    });
     this.bottle = bottleParts();
     this.crackMat = new THREE.MeshBasicMaterial({ map: tex(crackCanvas(77)), transparent: true, depthWrite: false, fog: false, opacity: 0 });
     const streak = document.createElement('canvas');
@@ -107,6 +118,20 @@ export class RockLibrary {
 
   frontZ(variant) {
     return this.blocks[variant].boundingBox.max.z;
+  }
+
+  /** Tag material and aspect for `type`; `dir` (-1 / 1) adds an arrow for the drift side. */
+  tag(type, dir = 0) {
+    if (!dir) return { material: this.tagMats[type], aspect: this.tagAspects[type] };
+    const key = `${type}|${dir}`;
+    let t = this.arrowTags.get(key);
+    if (!t) {
+      const a = appearanceOf(type).tag;
+      const c = labelCanvas(dir > 0 ? `${a.text} →` : `← ${a.text}`, { fg: a.fg, bg: a.bg, height: 64 });
+      t = { material: new THREE.SpriteMaterial({ map: tex(c), transparent: true, depthWrite: false, fog: false }), aspect: c.width / c.height };
+      this.arrowTags.set(key, t);
+    }
+    return t;
   }
 
   /** Frees every material and texture this library owns (block/cap geometries are shared). */
@@ -127,6 +152,8 @@ export class RockLibrary {
     for (const m of Object.values(this.typeMats)) disposeMat(m);
     for (const m of Object.values(this.emblemMats)) disposeMat(m);
     for (const m of Object.values(this.tagMats)) disposeMat(m);
+    for (const t of this.arrowTags.values()) disposeMat(t.material);
+    disposeMat(this.fogMat);
     for (const part of this.bottle) {
       part.geometry.dispose();
       disposeMat(part.material);
@@ -167,6 +194,7 @@ export class ItemVisual {
       this.bottle.add(mesh);
     }
     this.bottle.rotation.z = 0.14;
+    this.bottle.scale.setScalar(ROCK.blockScale);
     this.group.add(this.rock, this.cap, this.crack, this.emblem, this.trail, this.bottle, this.tag);
     this.group.visible = false;
     this.mode = null;
@@ -176,6 +204,8 @@ export class ItemVisual {
     const lib = this.lib;
     this.type = type;
     this.variant = variant;
+    this.fogged = false;
+    this.tagDir = 0;
     this.tag.material = lib.tagMats[type];
     this.tagAspect = lib.tagAspects[type];
     this.tag.visible = false;
@@ -212,7 +242,28 @@ export class ItemVisual {
     if (!show) return;
     const h = 0.46;
     this.tag.scale.set((h * this.tagAspect) / sx, h / sy, 1);
-    this.tag.position.set(0, 0.95 / sy, 0.75 / sz);
+    this.tag.position.set(0, (0.95 * ROCK.blockScale) / sy, 0.75 / sz);
+  }
+
+  /** Points the tag at the side a pushed rock will drift to (0 = the plain tag). */
+  useTag(dir) {
+    if (dir === this.tagDir) return;
+    this.tagDir = dir;
+    const t = this.lib.tag(this.type, dir);
+    this.tag.material = t.material;
+    this.tagAspect = t.aspect;
+  }
+
+  /** Fog hides what a rock is: plain stone with no marking, until it drops below the fog. */
+  setFogged(on) {
+    if (on === this.fogged) return;
+    this.fogged = on;
+    const bottle = !on && appearanceOf(this.type).kind === 'bottle';
+    this.bottle.visible = bottle;
+    this.rock.visible = !bottle;
+    this.crack.visible = !bottle;
+    this.emblem.visible = !on && !bottle;
+    this.rock.material = on ? this.lib.fogMat : this.lib.typeMats[this.type];
   }
 
   /** Frees this visual's own clones; everything else belongs to the shared library. */
@@ -227,21 +278,29 @@ export class ShelfCells {
   constructor(lib) {
     this.lib = lib;
     this.group = new THREE.Group();
+    const euler = new THREE.Euler();
     this.cells = cliffCells().map((cell) => {
       const variant = variantOfCell(cell.id);
-      const mesh = new THREE.Mesh(lib.blocks[variant]);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      const cap = new THREE.Mesh(lib.caps[variant]);
-      cap.position.y = lib.blocks[variant].boundingBox.max.y - 0.06;
-      mesh.add(cap);
-      const home = setRayPoint(new THREE.Vector3(), cell.x, cell.y, cell.z);
-      mesh.position.copy(home);
-      mesh.rotation.y = ((cell.id * 37) % 11) / 11 * 0.3 - 0.15;
-      this.group.add(mesh);
-      return { cell, variant, mesh, cap, home, baseRotY: mesh.rotation.y };
+      const rot = new THREE.Quaternion().setFromEuler(euler.set(0, ((cell.id * 37) % 11) / 11 * 0.3 - 0.15, 0));
+      return { cell, variant, rot, home: setRayPoint(new THREE.Vector3(), cell.x, cell.y, cell.z), capY: lib.blocks[variant].boundingBox.max.y - 0.06 };
     });
     this.materials = [];
+    this.batches = [];
+    this.m = new THREE.Matrix4();
+    this.capM = new THREE.Matrix4();
+    this.p = new THREE.Vector3();
+    this.s = new THREE.Vector3();
+  }
+
+  _batch(geometry, material, count, shadows) {
+    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    mesh.castShadow = shadows;
+    mesh.receiveShadow = shadows;
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.group.add(mesh);
+    this.batches.push(mesh);
+    return mesh;
   }
 
   setTheme(theme) {
@@ -264,38 +323,57 @@ export class ShelfCells {
       emissive: theme.capKind === 'snow' ? new THREE.Color('#223344') : new THREE.Color(0),
       emissiveIntensity: 0.25,
     });
-    for (const c of this.cells) {
-      c.mesh.material = this.materials[c.cell.id % this.materials.length];
-      c.cap.material = this.capMaterial;
-      c.cap.visible = theme.capKind !== 'none';
+    for (const b of this.batches) {
+      this.group.remove(b);
+      b.dispose();
     }
+    this.batches = [];
+    const blocks = new Map();
+    for (const c of this.cells) {
+      const key = `${c.variant}|${c.cell.id % this.materials.length}`;
+      if (!blocks.has(key)) blocks.set(key, []);
+      blocks.get(key).push(c);
+    }
+    for (const list of blocks.values()) {
+      const mesh = this._batch(lib.blocks[list[0].variant], this.materials[list[0].cell.id % this.materials.length], list.length, true);
+      list.forEach((c, i) => Object.assign(c, { block: mesh, blockIndex: i, cap: null }));
+    }
+    if (theme.capKind !== 'none') {
+      lib.caps.forEach((geometry, variant) => {
+        const list = this.cells.filter((c) => c.variant === variant);
+        if (!list.length) return;
+        const mesh = this._batch(geometry, this.capMaterial, list.length, false);
+        list.forEach((c, i) => Object.assign(c, { cap: mesh, capIndex: i }));
+      });
+    }
+    this.update(null, 0);
   }
 
   /** Visual state for time `t` from the stage's per-cell timeline (null timeline = all intact). */
   update(timeline, t) {
     for (const c of this.cells) {
+      if (!c.block) continue;
       const drop = timeline ? timeline.current(c.cell.id, t) : null;
-      const mesh = c.mesh;
-      if (!drop || t >= drop.refillEndAt) {
-        mesh.visible = true;
-        mesh.position.copy(c.home);
-        mesh.scale.setScalar(1);
-        continue;
+      let scale = 1;
+      this.p.copy(c.home);
+      if (drop && t < drop.refillEndAt) {
+        if (t < drop.refillAt) scale = 0;
+        else {
+          const e = 1 - Math.pow(1 - (t - drop.refillAt) / (drop.refillEndAt - drop.refillAt), 3);
+          setRayPoint(this.p, c.cell.x, c.cell.y, c.cell.z - 1.3 * (1 - e));
+          scale = 0.7 + 0.3 * e;
+        }
       }
-      if (t < drop.refillAt) {
-        mesh.visible = false; // cracking (item rock shown instead) or an empty hole
-        continue;
-      }
-      // Refill: a new rock slides forward out of the socket.
-      const p = (t - drop.refillAt) / (drop.refillEndAt - drop.refillAt);
-      const e = 1 - Math.pow(1 - p, 3);
-      mesh.visible = true;
-      setRayPoint(mesh.position, c.cell.x, c.cell.y, c.cell.z - 1.3 * (1 - e));
-      mesh.scale.setScalar(0.7 + 0.3 * e);
+      this.m.compose(this.p, c.rot, this.s.setScalar(scale));
+      c.block.setMatrixAt(c.blockIndex, this.m);
+      if (c.cap) c.cap.setMatrixAt(c.capIndex, this.capM.makeTranslation(0, c.capY, 0).premultiply(this.m));
     }
+    for (const b of this.batches) b.instanceMatrix.needsUpdate = true;
   }
 
   dispose() {
+    for (const b of this.batches) b.dispose();
+    this.batches = [];
     for (const m of this.materials) m.dispose();
     this.materials = [];
     this.capMaterial?.dispose();

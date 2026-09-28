@@ -22,6 +22,13 @@ function loadImage(url) {
   });
 }
 
+const cartImages = new Map();
+
+export function loadCartImage(url) {
+  if (!cartImages.has(url)) cartImages.set(url, loadImage(url));
+  return cartImages.get(url);
+}
+
 let cache = null;
 
 /** Resolves to { name: HTMLImageElement | null }. Never rejects; gives up after `timeoutMs`. */

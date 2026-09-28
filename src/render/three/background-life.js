@@ -146,6 +146,8 @@ export class BackgroundLife {
     this.reducedMotion = false;
     this.wind = LIFE.baseWind;
     this.windDir = 1;
+    /** Extra steady wind on windy stages (signed), set by the renderer each frame. */
+    this.stageWind = 0;
     this.gust = null;
     this.events = [];
     this.stats = { slides: 0, sifts: 0, flocks: 0, gusts: 0, avalanches: 0, eruptions: 0, spatters: 0 };
@@ -178,7 +180,7 @@ export class BackgroundLife {
       s.mesh.material.color.set(theme.id === 'volcano' ? '#ff7a3a' : '#fff3d6');
       s.base = theme.id === 'volcano' ? 0.05 : 0.09;
       s.mesh.scale.set(rand(2.2, 3.4), 24, 1);
-      s.mesh.position.set(-9 + i * 5.5 + rand(-1, 1), 6, -3.0);
+      s.mesh.position.set(-(ARENA.halfWidth + 1) + i * 6.9 + rand(-1, 1), 6, -3.0);
       s.mesh.rotation.z = -0.42;
     });
     const tint = theme.id === 'volcano' ? '#6a5a56' : '#ffffff';
@@ -245,7 +247,7 @@ export class BackgroundLife {
       gustEnv = p >= 1 ? 0 : Math.sin(Math.PI * p);
       if (p >= 1) this.gust = null;
     }
-    this.wind = this.windDir * (LIFE.baseWind + gustEnv * (calm ? 0 : LIFE.gustStrength));
+    this.wind = this.windDir * (LIFE.baseWind + gustEnv * (calm ? 0 : LIFE.gustStrength)) + this.stageWind;
 
     // Timers.
     for (const k of Object.keys(this.timers)) this.timers[k] -= dt;
@@ -304,7 +306,7 @@ export class BackgroundLife {
       this._schedule('sift', LIFE.siftEvery);
       if (!calm) {
         const z = -3.1;
-        const px = rand(-7.4, 7.4);
+        const px = rand(-(ARENA.halfWidth - 0.6), ARENA.halfWidth - 0.6);
         this.events.push({ kind: 'sift', p: new THREE.Vector3(worldX(px, z), worldY(6.5, z), z), t: 0, duration: rand(2, 3.4) });
         this.stats.sifts++;
       }

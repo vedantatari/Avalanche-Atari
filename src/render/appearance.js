@@ -13,9 +13,10 @@ export const ROCK_APPEARANCE = Object.freeze({
   coin: {
     kind: 'rock',
     name: 'Gold rock',
-    base: '#8f877e',
-    vein: '#ffc53a',
-    glow: 0.55,
+    base: '#6b4b32',
+    vein: '#ffc21a',
+    glow: 1,
+    emblemGlow: 0.8,
     emblem: 'coin',
     popup: '+50',
     popupColor: '#ffd35a',
@@ -25,9 +26,10 @@ export const ROCK_APPEARANCE = Object.freeze({
   cash: {
     kind: 'rock',
     name: 'Emerald rock',
-    base: '#7a817c',
-    vein: '#2fd683',
-    glow: 0.45,
+    base: '#34503a',
+    vein: '#2dff6e',
+    glow: 1,
+    emblemGlow: 0.8,
     emblem: 'cash',
     popup: '+100',
     popupColor: '#5ef0a4',
@@ -49,9 +51,10 @@ export const ROCK_APPEARANCE = Object.freeze({
   expand: {
     kind: 'rock',
     name: 'Wide rock',
-    base: '#4c8c84',
-    vein: '#8ef5dd',
-    glow: 0.3,
+    base: '#355a55',
+    vein: '#3ff0ff',
+    glow: 1,
+    emblemGlow: 0.8,
     emblem: 'expand',
     popup: 'WIDE SCOOP',
     popupColor: '#8ef5dd',
@@ -61,9 +64,10 @@ export const ROCK_APPEARANCE = Object.freeze({
   shrink: {
     kind: 'rock',
     name: 'Narrow rock',
-    base: '#b4665b',
-    vein: '#ffb3a3',
-    glow: 0.25,
+    base: '#6e3428',
+    vein: '#ff3b26',
+    glow: 1,
+    emblemGlow: 0.8,
     emblem: 'shrink',
     popup: 'NARROW',
     popupColor: '#ff9d8a',
@@ -73,9 +77,10 @@ export const ROCK_APPEARANCE = Object.freeze({
   fire: {
     kind: 'rock',
     name: 'Fire rock',
-    base: '#2d2524',
+    base: '#231d1b',
     vein: '#ff7417',
     glow: 1,
+    emblemGlow: 0.85,
     emblem: 'fire',
     popup: '−1 ♥',
     popupColor: '#ff6a3d',
@@ -88,6 +93,7 @@ export const ROCK_APPEARANCE = Object.freeze({
     base: '#1c0b16',
     vein: '#ff2f4e',
     glow: 1,
+    emblemGlow: 0.75,
     emblem: 'demon',
     popup: 'DEMON!',
     popupColor: '#ff3d5c',
@@ -155,7 +161,88 @@ export const ROCK_APPEARANCE = Object.freeze({
     tag: { text: 'CLONE', fg: '#c8d0ff', bg: GOOD_TAG },
     particle: ['#c8d0ff', '#f0f2ff', '#5b64a8'],
   },
+  split: {
+    kind: 'rock',
+    name: 'Split rock',
+    base: '#80705c',
+    vein: '#ffb347',
+    glow: 0.5,
+    emblem: 'split',
+    popup: '+40',
+    popupColor: '#ffc36b',
+    tag: { text: 'SPLIT', fg: '#ffc36b', bg: GOOD_TAG },
+    particle: ['#ffc36b', '#fff0d0', '#d98a2b'],
+  },
+  magnet: {
+    kind: 'rock',
+    name: 'Magnet rock',
+    base: '#58607a',
+    vein: '#7fd8ff',
+    glow: 0.5,
+    emblem: 'magnet',
+    popup: 'MAGNET',
+    popupColor: '#8fe4ff',
+    tag: { text: 'MAGNET', fg: '#8fe4ff', bg: GOOD_TAG },
+    particle: ['#8fe4ff', '#e8f9ff', '#e2474b'],
+  },
+  mystery: {
+    kind: 'rock',
+    name: 'Mystery rock',
+    base: '#6a4b78',
+    vein: '#e59bff',
+    glow: 0.55,
+    emblem: 'mystery',
+    popup: '?!',
+    popupColor: '#f0b8ff',
+    tag: { text: '???', fg: '#ffffff', bg: 'rgba(110,62,170,0.94)' },
+    particle: ['#f0b8ff', '#fff0ff', '#9a4fd0'],
+  },
+  frost: {
+    kind: 'rock',
+    name: 'Frost rock',
+    base: '#8fb2c8',
+    vein: '#e2f7ff',
+    glow: 0.35,
+    emblem: 'frost',
+    popup: 'FROZEN',
+    popupColor: '#bfeaff',
+    tag: { text: 'FREEZE', fg: '#ffffff', bg: BAD_TAG },
+    particle: ['#dff5ff', '#ffffff', '#7fb8e0'],
+  },
 });
+
+export const CART_TIERS = [
+  { name: 'Rusty Rider', thumb: 'assets/carts/cart-1.png', tub: '#ffffff', lip: '#5a6168', frame: '#26292e', hub: '#a0582a', accent: '#9c5424', stripe: false },
+  { name: 'Red Runner', thumb: 'assets/carts/cart-2.png', tub: '#ff8f80', lip: '#e9ebee', frame: '#2a2426', hub: '#ffd23a', accent: '#ffffff', stripe: true },
+  { name: 'Copper Classic', sprite: 'assets/carts/cart-3.png', aspect: 512 / 502, rim: 0.398 },
+  { name: 'Red Racer', sprite: 'assets/carts/cart-4.png', aspect: 512 / 477, rim: 0.382 },
+  { name: 'Steam Engine', sprite: 'assets/carts/cart-5.png', aspect: 506 / 512, rim: 0.389 },
+  { name: 'Thunder Bolt', sprite: 'assets/carts/cart-6.png', aspect: 497 / 512, rim: 0.377 },
+  { name: 'Crystal Frost', sprite: 'assets/carts/cart-7.png', aspect: 494 / 512, rim: 0.389 },
+  { name: 'Magma Core', sprite: 'assets/carts/cart-8.png', aspect: 512 / 505, rim: 0.376 },
+  { name: 'Neon Nova', sprite: 'assets/carts/cart-9.png', aspect: 512 / 486, rim: 0.391 },
+  { name: 'Emerald Dragon', sprite: 'assets/carts/cart-10.png', aspect: 489 / 512, rim: 0.389 },
+];
+
+export const CART_SLICES = [0, 0.15, 0.27, 0.73, 0.85, 1];
+
+export function cartSliceXs(width, base, imgW) {
+  const f = width / base;
+  const fixed = CART_SLICES[1] + (CART_SLICES[3] - CART_SLICES[2]) + (1 - CART_SLICES[4]);
+  const k = Math.max(0.3, (f - fixed) / (1 - fixed));
+  const squeeze = f / (fixed + (1 - fixed) * k);
+  const xs = [0];
+  for (let i = 1; i < CART_SLICES.length; i++) xs.push(xs[i - 1] + (CART_SLICES[i] - CART_SLICES[i - 1]) * (i === 2 || i === 4 ? k : 1));
+  const total = xs[xs.length - 1];
+  return xs.map((x) => (x - total / 2) * imgW * squeeze);
+}
+
+export const cartTier = (unlockedLevel) => Math.max(0, Math.min(CART_TIERS.length - 1, Math.floor(((unlockedLevel || 1) - 1) / 10)));
+
+/** Popup text when a mystery rock reveals its outcome (a jackpot shows its points instead). */
+export function revealPopup(reveal) {
+  return reveal === 'jackpot' ? 'JACKPOT' : ROCK_APPEARANCE[reveal]?.popup || '?!';
+}
 
 export function appearanceOf(type) {
   const a = ROCK_APPEARANCE[type];
@@ -186,17 +273,30 @@ export function effectBadges(timers) {
   if (timers.cloneSeconds > 0) {
     out.push({ key: 'clone', text: `SHADOW CLONES ${secs(timers.cloneSeconds)}s`, style: { fg: '#ffffff', bg: 'rgba(64,72,132,0.95)' } });
   }
+  if (timers.magnetSeconds > 0) {
+    out.push({ key: 'magnet', text: `MAGNET ${secs(timers.magnetSeconds)}s`, style: { fg: '#062a3a', bg: 'rgba(140,225,255,0.95)' } });
+  }
+  if (timers.frostSeconds > 0) {
+    out.push({ key: 'frost', text: `FROZEN ${secs(timers.frostSeconds)}s`, style: { fg: '#ffffff', bg: 'rgba(52,120,178,0.95)' } });
+  }
   return out;
 }
 
-/** Short legend text shared by the side panel, tutorial, and How to play. */
+/**
+ * Short legend text shared by the side panel, tutorial, and How to play. `short` labels the
+ * compact menu legend on mid-height screens.
+ */
 export const LEGEND = [
-  { types: ['coin', 'cash'], title: 'Gold / $ rock', detail: '+50 / +100', verdict: 'catch' },
-  { types: ['shield'], title: 'Shield rock', detail: 'Bank +1', verdict: 'catch' },
-  { types: ['expand', 'shrink'], title: '+ / − rock', detail: 'Size · 5s', verdict: 'mixed' },
-  { types: ['fire'], title: 'Fire rock', detail: 'Lose a heart', verdict: 'avoid' },
-  { types: ['demon'], title: 'Demon', detail: 'Instant game over', verdict: 'avoid' },
-  { types: ['reverse'], title: 'Whiskey', detail: 'Reverse · 5s', verdict: 'avoid' },
-  { types: ['mult2', 'mult3', 'mult5'], title: '×2 ×3 ×5 rock', detail: 'Points · 5s', verdict: 'catch' },
-  { types: ['clone'], title: 'Shadow rock', detail: 'Clones · 5s', verdict: 'catch' },
+  { types: ['coin', 'cash'], title: 'Gold / $ rock', short: 'Gold · $', detail: '+50 / +100', verdict: 'catch' },
+  { types: ['shield'], title: 'Shield rock', short: 'Shield', detail: 'Bank +1', verdict: 'catch' },
+  { types: ['expand', 'shrink'], title: '+ / − rock', short: '+ / −', detail: 'Size · 5s', verdict: 'mixed' },
+  { types: ['fire'], title: 'Fire rock', short: 'Fire', detail: 'Lose a heart', verdict: 'avoid' },
+  { types: ['demon'], title: 'Demon', short: 'Demon', detail: 'Instant game over', verdict: 'avoid' },
+  { types: ['reverse'], title: 'Whiskey', short: 'Whiskey', detail: 'Reverse · 5s', verdict: 'avoid' },
+  { types: ['mult2', 'mult3', 'mult5'], title: '×2 ×3 ×5 rock', short: '×2 ×3 ×5', detail: 'Points · 5s', verdict: 'catch' },
+  { types: ['clone'], title: 'Shadow rock', short: 'Shadow', detail: 'Clones · 5s', verdict: 'catch' },
+  { types: ['split'], title: 'Split rock', short: 'Split', detail: '2 × +40', verdict: 'catch' },
+  { types: ['magnet'], title: 'Magnet', short: 'Magnet', detail: 'Pull · 5s', verdict: 'catch' },
+  { types: ['mystery'], title: '? rock', short: '? rock', detail: 'Surprise', verdict: 'mixed' },
+  { types: ['frost'], title: 'Frost rock', short: 'Frost', detail: 'Slow · 4s', verdict: 'avoid' },
 ];

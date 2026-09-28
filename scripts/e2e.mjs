@@ -62,7 +62,15 @@ async function openGame({ w = 1366, h = 768, touch = false, mobile = false, quer
   // The relative-drag and keyboard checks predate pointer-follow; the dedicated follow test
   // re-enables it. Everything else runs with the classic relative controls.
   await page.evaluate(() => window.__avalanche.app.setSetting('pointerFollow', false));
-  if (tutorial) await page.evaluate(() => window.__avalanche.store.markTutorialDone());
+  // A returning player: tutorial done and the one-time terrain hints already seen, so they
+  // never queue ahead of the toasts a check is looking for.
+  if (tutorial) {
+    await page.evaluate(() => {
+      const store = window.__avalanche.store;
+      store.markTutorialDone();
+      for (const key of ['terrain:ice', 'terrain:volcano']) store.markSeen(key);
+    });
+  }
   if (SHOTS) await page.evaluate(() => document.querySelector('[style*="monospace"]')?.remove());
   const g = {
     page,
@@ -93,9 +101,11 @@ const rect = (page, sel) => page.evaluate((s) => {
   return { x: r.x, y: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
 }, sel);
 
-/** Waits until the cart has rested near a position. */
+/** Waits until the cart has come to rest (on Ice it glides on after input stops). */
 async function settle(g) {
-  await g.page.waitForTimeout(250);
+  await g.page.waitForTimeout(100);
+  await g.waitFor(() => window.__avalanche.state().cartV === 0, null, 3000);
+  await g.page.waitForTimeout(50);
 }
 
 // ---------------------------------------------------------------------------- tests
@@ -203,7 +213,7 @@ await test('first play shows the catch/avoid tutorial, then starts level 1', asy
   const title = await g.eval(() => !document.getElementById('ov-howto').hidden && document.getElementById('howto-title').textContent);
   check(title === 'Before you start', `tutorial title ${title}`);
   const items = await g.eval(() => document.querySelectorAll('#howto-grid .howto-item').length);
-  check(items === 10, `tutorial items ${items}`);
+  check(items === 14, `tutorial items ${items}`);
   await g.page.click('#btn-howto-ok');
   await g.waitFor(() => window.__avalanche.state().phase === 'playing');
   const s = await g.state();
@@ -235,7 +245,7 @@ await test('keyboard: arrows and A/D move the cart smoothly; release stops it', 
   await g.page.waitForTimeout(1600);
   await g.page.keyboard.up('KeyD');
   const s = await g.state();
-  check(Math.abs(s.cartX + s.scoopWidth / 2 - 8) < 1e-6, `cart not clamped at right edge: ${s.cartX}`);
+  check(Math.abs(s.cartX + s.scoopWidth / 2 - 10) < 1e-6, `cart not clamped at right edge: ${s.cartX}`);
   await g.close();
 });
 
@@ -322,6 +332,7 @@ await test('mouse: absolute pointer-follow steers by hovering; reverse mirrors i
   await g.page.mouse.move(scene.cx, y);
   await g.page.mouse.move(scene.cx + 160, y, { steps: 8 });
   await g.page.waitForTimeout(400);
+  await settle(g);
   const world = await g.eval((px) => {
     const L = window.__avalanche.layout;
     const r = document.getElementById('scene').getBoundingClientRect();
@@ -335,11 +346,13 @@ await test('mouse: absolute pointer-follow steers by hovering; reverse mirrors i
   await g.page.mouse.move(scene.cx + 159, y);
   await g.page.mouse.move(scene.cx + 160, y);
   await g.page.waitForTimeout(500);
+  await settle(g);
   const x2 = (await g.state()).cartX;
   check(Math.abs(x2 + world) < 0.5, `reversed follow at ${x2.toFixed(2)} (expected ~${(-world).toFixed(2)})`);
   // Keyboard still overrides the hovering pointer (a key press clears the follow target).
   await g.waitFor(() => window.__avalanche.state().reversed === false, null, 9000);
   await g.page.waitForTimeout(600); // the cart eases back to the un-mirrored follow target
+  await settle(g);
   const x3 = (await g.state()).cartX;
   await g.page.keyboard.down('ArrowLeft');
   await g.page.waitForTimeout(300);
@@ -390,6 +403,7 @@ await test('reverse: flips keyboard, touch zones and drag; shows REVERSED; ends 
   await g.page.keyboard.down('ArrowRight');
   await g.page.waitForTimeout(250);
   await g.page.keyboard.up('ArrowRight');
+  await settle(g);
   let x2 = (await g.state()).cartX;
   check(x2 < x - 0.8, `ArrowRight while reversed: ${x} -> ${x2}`);
   const scene = await rect(g.page, '#scene');
@@ -398,6 +412,7 @@ await test('reverse: flips keyboard, touch zones and drag; shows REVERSED; ends 
   await touch('touchStart', [{ x: scene.cx - scene.w * 0.3, y: scene.cy, id: 9 }]);
   await g.page.waitForTimeout(250);
   await touch('touchEnd', [{ x: scene.cx - scene.w * 0.3, y: scene.cy, id: 9 }]);
+  await settle(g);
   const x3 = (await g.state()).cartX;
   check(x3 > x2 + 0.8, `left touch zone while reversed: ${x2} -> ${x3}`);
   await g.page.mouse.move(scene.cx, scene.cy);
@@ -405,6 +420,7 @@ await test('reverse: flips keyboard, touch zones and drag; shows REVERSED; ends 
   await g.page.mouse.move(scene.cx + 60, scene.cy, { steps: 6 });
   await g.page.waitForTimeout(200);
   await g.page.mouse.up();
+  await settle(g);
   const x4 = (await g.state()).cartX;
   check(x4 < x3 - 0.5, `drag right while reversed: ${x3} -> ${x4}`);
   const t = await g.state();
@@ -459,16 +475,16 @@ await test('expand then shrink change only the scoop width for 5 s', async () =>
   await g.waitFor(() => window.__avalanche.state().effects?.size === 'expand');
   await g.page.waitForTimeout(300);
   let s = await g.state();
-  check(Math.abs(s.scoopWidth - 2.56 * 1.4) < 1e-6, `expanded width ${s.scoopWidth}`);
+  check(Math.abs(s.scoopWidth - 2.816 * 1.4) < 1e-6, `expanded width ${s.scoopWidth}`);
   await g.eval(() => window.__avalanche.injectDrop('shrink', window.__avalanche.state().cartX, 0.5));
   await g.waitFor(() => window.__avalanche.state().effects?.size === 'shrink');
   await g.page.waitForTimeout(300);
   s = await g.state();
-  check(Math.abs(s.scoopWidth - 2.56 * 0.7) < 1e-6, `shrunk width ${s.scoopWidth}`);
+  check(Math.abs(s.scoopWidth - 2.816 * 0.7) < 1e-6, `shrunk width ${s.scoopWidth}`);
   await g.waitFor(() => window.__avalanche.state().effects?.size === null, null, 9000);
   await g.page.waitForTimeout(300);
   s = await g.state();
-  check(Math.abs(s.scoopWidth - 2.56) < 1e-6, `width restored ${s.scoopWidth}`);
+  check(Math.abs(s.scoopWidth - 2.816) < 1e-6, `width restored ${s.scoopWidth}`);
   await g.close();
 });
 
@@ -497,7 +513,7 @@ await test('fire + revive: paused decision, restore costs 1 then 2, End run lose
   await g.page.click('#btn-revive-no');
   await g.waitFor(() => !document.getElementById('ov-result').hidden, null, 5000);
   const r = await g.eval(() => ({ title: document.getElementById('result-title').textContent, next: document.getElementById('btn-next').hidden }));
-  check(r.title === 'Stage failed' && r.next, `result ${JSON.stringify(r)}`);
+  check(r.title === 'Out of hearts!' && r.next, `result ${JSON.stringify(r)}`);
   check(!(await g.eval(() => window.__avalanche.store.isUnlocked(2))), 'failure unlocked level 2');
   await g.close();
 });
@@ -568,21 +584,50 @@ await test('level 100 completion shows the summit screen with replay, no level 1
   await g.close();
 });
 
-await test('terrain: locked during a stage, switchable in the menu, mechanics unchanged', async () => {
+await test('terrain: locked during a stage, switchable in the menu; its rule applies to the run', async () => {
   const g = await openGame();
   await g.startLevel(1);
+  check((await g.state()).terrain === 'ice', 'the default Ice terrain rule is not applied');
   const disabled = await g.eval(() => [...document.querySelectorAll('.terrain-card')].every((b) => b.disabled));
   check(disabled, 'terrain cards clickable during a stage');
-  const sched1 = await g.eval(() => JSON.stringify(window.__avalanche.sim.stage.schedule.drops.slice(0, 0)));
   await g.page.keyboard.press('Escape');
   await g.page.click('#btn-pause-menu');
   await g.page.click('#menu-terrain .terrain-card[data-theme="volcano"]');
   check((await g.eval(() => window.__avalanche.store.data.theme)) === 'volcano', 'theme not saved');
-  // Same seed + level -> identical schedule regardless of theme.
-  const a = await g.eval(() => { const s = window.__avalanche.sim; s.startRun(7, { seed: 99 }); const d = JSON.stringify(s.stage.schedule.drops); s.quit(); return d; });
-  await g.eval(() => window.__avalanche.app.setTheme('ice'));
-  const b = await g.eval(() => { const s = window.__avalanche.sim; s.startRun(7, { seed: 99 }); const d = JSON.stringify(s.stage.schedule.drops); s.quit(); return d; });
-  check(a === b && sched1 === '[]', 'schedule changed with theme');
+  const rule = await g.eval(() => document.querySelector('#menu-terrain .terrain-card[data-theme="volcano"] .name small').textContent);
+  check(rule.includes('Heat vents'), `volcano card rule "${rule}"`);
+  await g.startLevel(3);
+  check((await g.state()).terrain === 'volcano', 'the Volcano rule is not applied');
+  // Same seed + level: the same rocks from the same cells at the same times on both terrains;
+  // only the volcano's heat vents move some landing spots.
+  const run = (terrain) => g.eval((t) => {
+    const s = new window.__avalanche.sim.constructor();
+    s.startRun(7, { seed: 99, terrain: t });
+    return s.stage.schedule.drops.map((d) => [d.type, d.cellId, d.crackAt, d.arriveAt, d.x]);
+  }, terrain);
+  const [ice, volcano] = [await run('ice'), await run('volcano')];
+  const base = (list) => JSON.stringify(list.map((d) => d.slice(0, 4)));
+  check(base(ice) === base(volcano), 'terrain changed which rocks fall, or when');
+  check(volcano.some((d, i) => d[4] !== ice[i][4]), 'heat vents moved no landing spot');
+  await g.close();
+});
+
+await test('ice glides after release; volcano stops at once', async () => {
+  const g = await openGame();
+  const glide = async (terrain) => {
+    await g.eval((t) => { const a = window.__avalanche; a.app.toMenu(); a.app.setTheme(t); }, terrain);
+    await g.startLevel(1);
+    await g.page.keyboard.down('ArrowRight');
+    await g.page.waitForTimeout(300);
+    await g.page.keyboard.up('ArrowRight');
+    const x = (await g.state()).cartX;
+    await settle(g);
+    return (await g.state()).cartX - x;
+  };
+  const volcano = await glide('volcano');
+  const ice = await glide('ice');
+  check(volcano < 0.6, `volcano coasted ${volcano.toFixed(2)}`);
+  check(ice > 1, `ice coasted only ${ice.toFixed(2)}`);
   await g.close();
 });
 
@@ -715,6 +760,9 @@ await test('daily challenge: one seeded stage per day; retry replays the same ro
   await g.waitFor(() => window.__avalanche.state().phase === 'playing', null, 20000);
   const s = await g.state();
   check(s.mode === 'daily' && s.level === info.level && s.seed === info.seed, `daily ${JSON.stringify({ level: s.level, seed: s.seed, info })}`);
+  // Everyone plays today's daily on the same terrain; the scene shows it for the daily only.
+  const shown = await g.eval(() => window.__avalanche.app.renderer.themeId);
+  check(s.terrain === info.terrain && shown === info.terrain, `daily terrain ${s.terrain}/${shown}, want ${info.terrain}`);
   const sched = await g.eval(() => JSON.stringify(window.__avalanche.sim.stage.schedule.drops.map((d) => [d.type, d.cellId])));
   await g.eval((t) => window.__avalanche.grant({ score: t }), s.target);
   await g.waitFor(() => !document.getElementById('ov-result').hidden, null, 10000);
@@ -725,6 +773,10 @@ await test('daily challenge: one seeded stage per day; retry replays the same ro
   await g.waitFor(() => window.__avalanche.state().phase === 'playing', null, 20000);
   const again = await g.eval(() => JSON.stringify(window.__avalanche.sim.stage.schedule.drops.map((d) => [d.type, d.cellId])));
   check(again === sched, 'daily retry produced a different schedule');
+  await g.page.keyboard.press('Escape');
+  await g.page.click('#btn-pause-menu');
+  const back = await g.eval(() => ({ shown: window.__avalanche.app.renderer.themeId, saved: window.__avalanche.store.data.theme }));
+  check(back.shown === back.saved, `menu kept the daily's terrain ${JSON.stringify(back)}`);
   await g.close();
 });
 
@@ -811,6 +863,128 @@ await test('renderer switch 3D↔2D repeats cleanly (dispose) and keeps one canv
   await g.close();
 });
 
+await test('new rocks: both split halves land in a centred cart; magnet pulls; frost slows; ? reveals', async () => {
+  const g = await openGame();
+  await g.eval(() => window.__avalanche.app.setTheme('volcano')); // no glide: the cart stays put
+  await g.startLevel(8);
+  await g.eval(() => {
+    const a = window.__avalanche;
+    a.injectDrop('split', 0, 0.8);
+    a.injectDrop('mystery', 0, 1.2, { reveal: 'jackpot' });
+    a.injectDrop('magnet', 0, 1.5);
+    a.injectDrop('coin', 2.8, 1.9); // outside the scoop's own reach (1.87), inside the magnet's (3.47)
+    a.injectDrop('frost', 0, 2.3);
+  });
+  await g.waitFor(() => window.__avalanche.state().effects.frostSeconds > 0, null, 8000);
+  const s = await g.state();
+  check(s.caught.split === 2 && s.caught.mystery === 1 && s.caught.magnet === 1 && s.caught.coin === 1, `caught ${JSON.stringify(s.caught)}`);
+  check(s.score === 80 + 250 + 50, `score ${s.score} (want 2 × 40 + the 250 jackpot + a pulled 50)`);
+  check(s.effects.magnetSeconds > 0, 'magnet not active');
+  const badges = await g.eval(() => window.__avalanche.app.renderer.badges.sprites.frost.visible);
+  check(badges, 'no FROZEN badge above the cart');
+  await g.page.keyboard.down('ArrowRight');
+  await g.page.waitForTimeout(300);
+  const v = (await g.state()).cartV;
+  await g.page.keyboard.up('ArrowRight');
+  check(Math.abs(v - (21.48 * 0.5)) < 0.01, `frozen cart speed ${v.toFixed(2)} (want half of 21.48)`);
+  check(g.problems.length === 0, g.problems.join('\n'));
+  await g.close();
+});
+
+await test('weather: windy and fog stages announce their rule; fog hides markings above the fog', async () => {
+  const g = await openGame();
+  await g.eval(() => { const a = window.__avalanche; a.store.data.unlockedLevel = 17; a.app.selectLevel(14); });
+  await g.page.click('#btn-play');
+  const chips = await g.eval(() => [...document.querySelectorAll('#intro-rules .rule-chip')].map((c) => c.textContent));
+  check(chips.some((t) => t.includes('Slippery rail')) && chips.some((t) => t.includes('Windy')), `intro rules ${JSON.stringify(chips)}`);
+  await g.waitFor(() => window.__avalanche.state().phase === 'playing', null, 20000);
+  check((await g.state()).modifier === 'windy', 'level 14 is not windy');
+  await g.page.keyboard.press('Escape');
+  await g.page.click('#btn-pause-menu');
+  await g.eval(() => window.__avalanche.app.selectLevel(17));
+  await g.page.click('#btn-play');
+  await g.waitFor(() => window.__avalanche.state().phase === 'playing', null, 20000);
+  // Wait for a rock falling high up the arena (above the fog line), then look at it.
+  await g.waitFor(() => [...window.__avalanche.app.renderer.visuals.values()].some((e) => e.mode === 'fall' && e.visual.group.position.y > 6), null, 8000);
+  const fog = await g.eval(() => {
+    const r = window.__avalanche.app.renderer;
+    const high = [...r.visuals.values()].filter((e) => e.mode === 'fall' && e.visual.group.position.y > 6);
+    return { modifier: window.__avalanche.state().modifier, bank: r.fogBank.visible, high: high.length, hidden: high.every((e) => e.visual.fogged && !e.visual.tag.visible) };
+  });
+  check(fog.modifier === 'fog' && fog.bank, `fog stage ${JSON.stringify(fog)}`);
+  check(fog.hidden, `a rock above the fog shows its marking ${JSON.stringify(fog)}`);
+  const levels = await g.eval(() => { window.__avalanche.app.toMenu(); window.__avalanche.app.ui.showLevels(); return [...document.querySelectorAll('#level-grid .level-btn .mod')].length; });
+  check(levels === 5, `weather badges on levels 1–20: ${levels} (want 4, 7, 9, 14, 17)`);
+  await g.close();
+});
+
+await test('trophies: a first clear unlocks one (result card, trophy screen, saved)', async () => {
+  const g = await openGame({ query: '&duration=4' });
+  await g.startLevel(1);
+  await g.eval(() => window.__avalanche.grant({ score: 99999 }));
+  await g.waitFor(() => !document.getElementById('ov-result').hidden, null, 10000);
+  // A heartless-loss-free, far-over-target first clear: Off the ledge, Untouchable, Perfectionist.
+  const card = await g.eval(() => document.getElementById('result-trophies').textContent);
+  check(['Off the ledge', 'Untouchable', 'Perfectionist'].every((t) => card.includes(t)), `result trophies "${card}"`);
+  await g.page.click('#btn-result-menu');
+  const note = await g.eval(() => document.getElementById('trophy-note').textContent);
+  check(note.startsWith('3 /'), `menu trophy note "${note}"`);
+  await g.page.click('#btn-trophies');
+  const screen = await g.eval(() => ({
+    open: !document.getElementById('ov-trophies').hidden,
+    unlocked: [...document.querySelectorAll('#trophy-grid .trophy.unlocked b')].map((b) => b.textContent),
+    stats: document.getElementById('stats-grid').textContent,
+  }));
+  check(screen.open && screen.unlocked.includes('Off the ledge'), `trophy screen ${JSON.stringify(screen)}`);
+  check(screen.stats.includes('Stages cleared1'), `lifetime stats "${screen.stats}"`);
+  await g.page.keyboard.press('Escape');
+  check(await g.eval(() => document.getElementById('ov-trophies').hidden), 'Escape did not close the trophy screen');
+  const saved = await g.eval(() => JSON.parse(localStorage.getItem('avalanche.save')).achievements);
+  check(saved['first-clear'], `trophies not saved ${JSON.stringify(saved)}`);
+  await g.close();
+});
+
+await test('haptics: phones get a Vibration setting; catches buzz only while it is on', async () => {
+  const g = await openGame({ w: 390, h: 844, touch: true, mobile: true, initScript: () => {
+    window.__buzz = [];
+    navigator.vibrate = (p) => (window.__buzz.push(p), true);
+  } });
+  await g.page.click('#btn-settings');
+  check(await g.eval(() => !document.getElementById('haptics-row').hidden), 'no Vibration setting on a phone');
+  await g.page.click('[data-close]:visible');
+  await g.startLevel(1);
+  await g.eval(() => window.__avalanche.injectDrop('coin', window.__avalanche.state().cartX, 0.5));
+  await g.waitFor(() => window.__avalanche.state().score > 0, null, 5000);
+  check((await g.eval(() => window.__buzz.length)) > 0, 'a catch did not vibrate');
+  await g.eval(() => { window.__avalanche.app.setSetting('haptics', false); window.__buzz.length = 0; });
+  await g.eval(() => window.__avalanche.injectDrop('coin', window.__avalanche.state().cartX, 0.5));
+  await g.waitFor(() => window.__avalanche.state().score > 50, null, 5000);
+  check((await g.eval(() => window.__buzz.length)) === 0, 'vibrated with the setting off');
+  await g.close();
+});
+
+await test('PWA: manifest linked; the service worker caches the game so a reload works offline', async () => {
+  const g = await openGame({ tutorial: false });
+  const manifest = await g.eval(async () => {
+    const link = document.querySelector('link[rel="manifest"]');
+    const res = await fetch(link.href);
+    return { ok: res.ok, json: await res.json() };
+  });
+  check(manifest.ok && manifest.json.name === 'Avalanche' && manifest.json.icons.length >= 3, `manifest ${JSON.stringify(manifest)}`);
+  await g.eval(() => navigator.serviceWorker.ready);
+  await g.page.reload();
+  await g.page.waitForFunction(() => window.__avalanche && document.getElementById('loading').hidden, null, { timeout: 60000 });
+  check(await g.eval(() => !!navigator.serviceWorker.controller), 'service worker does not control the page');
+  await g.context.setOffline(true);
+  g.problems.length = 0;
+  await g.page.reload();
+  await g.page.waitForFunction(() => window.__avalanche && document.getElementById('loading').hidden, null, { timeout: 60000 });
+  const s = await g.state();
+  check(s.overlays.includes('ov-menu') && s.renderer === '3d', `offline boot ${JSON.stringify({ overlays: s.overlays, renderer: s.renderer })}`);
+  await g.context.setOffline(false);
+  await g.close();
+});
+
 // Layout checks at the viewports listed in the brief.
 const VIEWPORTS = [
   { name: 'desktop-1366x768', w: 1366, h: 768 },
@@ -858,7 +1032,7 @@ for (const vp of VIEWPORTS) {
       if (L.frameRect.top + L.frameRect.height > hudBottom + 0.5) issues.push('arena bottom under controls');
       const doc = document.documentElement;
       if (doc.scrollHeight > innerHeight + 1 || doc.scrollWidth > innerWidth + 1) issues.push(`page scrolls ${doc.scrollWidth}x${doc.scrollHeight}`);
-      return { issues, hud: document.getElementById('frame').dataset.hud, ppu: L.pxPerUnit, rockPx: Math.round(L.pxPerUnit * 1.36) };
+      return { issues, hud: document.getElementById('frame').dataset.hud, ppu: L.pxPerUnit, rockPx: Math.round(L.pxPerUnit * 1.36 * 1.1) };
     }, !!vp.touch);
     if (SHOTS) {
       await g.eval(() => document.querySelector('[style*="monospace"]')?.remove());
@@ -866,7 +1040,7 @@ for (const vp of VIEWPORTS) {
     }
     check(report.issues.length === 0, report.issues.join('; '));
     check(report.rockPx >= 26, `rocks too small: ${report.rockPx}px`);
-    console.log(`      hud=${report.hud} rock≈${report.rockPx}px scoop≈${Math.round(report.ppu * 2.56)}px`);
+    console.log(`      hud=${report.hud} rock≈${report.rockPx}px scoop≈${Math.round(report.ppu * 2.816)}px`);
     await g.close();
   });
 }
@@ -884,7 +1058,13 @@ await test('2D fallback renders a playable game when WebGL is unavailable', asyn
   await page.evaluate(() => window.__avalanche.store.markTutorialDone());
   await page.click('#btn-play');
   await page.waitForFunction(() => window.__avalanche.state().phase === 'playing');
-  await page.evaluate(() => { const a = window.__avalanche; a.clearUpcoming(); a.injectDrop('coin', 0, 0.6); ['cash', 'shield', 'fire', 'reverse'].forEach((t, i) => a.injectDrop(t, -6 + i * 4, 1.4)); });
+  await page.evaluate(() => {
+    const a = window.__avalanche;
+    a.clearUpcoming();
+    a.injectDrop('coin', 0, 0.6);
+    ['cash', 'shield', 'fire', 'reverse'].forEach((t, i) => a.injectDrop(t, -6 + i * 4, 1.4));
+    ['split', 'magnet', 'mystery', 'frost'].forEach((t, i) => a.injectDrop(t, -5 + i * 3.4, 1.8));
+  });
   await page.keyboard.down('ArrowLeft');
   await page.waitForTimeout(200);
   await page.keyboard.up('ArrowLeft');
@@ -895,6 +1075,20 @@ await test('2D fallback renders a playable game when WebGL is unavailable', asyn
   if (SHOTS) {
     await page.evaluate(() => window.__avalanche.setTimeScale(0));
     await page.screenshot({ path: `${SHOTS}/fallback-2d.png` });
+    await page.evaluate(() => window.__avalanche.setTimeScale(1));
+  }
+  // Weather draws in 2D too: a fog stage and a windy one on the volcano.
+  for (const [level, terrain] of [[17, 'ice'], [14, 'volcano']]) {
+    await page.evaluate(({ level, terrain }) => {
+      const a = window.__avalanche;
+      a.app.toMenu();
+      a.app.setTheme(terrain);
+      a.store.data.unlockedLevel = Math.max(a.store.data.unlockedLevel, level);
+      a.app.selectLevel(level);
+      a.app.play();
+    }, { level, terrain });
+    await page.waitForFunction(() => window.__avalanche.state().phase === 'playing', null, { timeout: 20000 });
+    await page.waitForTimeout(1500);
   }
   check(errors.length === 0, errors.join('\n'));
   await b2.close();

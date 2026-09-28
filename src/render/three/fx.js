@@ -463,12 +463,12 @@ export class Popups {
   }
 }
 
-/** Timed-effect badges above the cart (size, reverse, multiplier, clones), behind the rock plane. */
+/** Timed-effect badges above the cart (size, reverse, multiplier, clones, magnet, frost), behind the rock plane. */
 export class EffectBadges {
   constructor() {
     this.group = new THREE.Group();
     this.sprites = {};
-    for (const key of ['size', 'reverse', 'multiplier', 'clone']) {
+    for (const key of ['size', 'reverse', 'multiplier', 'clone', 'magnet', 'frost']) {
       this.sprites[key] = makeSprite();
       this.group.add(this.sprites[key]);
     }

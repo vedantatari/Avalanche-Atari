@@ -8,12 +8,18 @@ import {
   CLIFF,
   DEMON,
   DIFFICULTY,
+  DRIFT,
   EFFECTS,
   FAIRNESS,
+  MODIFIERS,
+  MYSTERY,
   ROCK,
+  SPLIT,
+  STORM,
+  TERRAIN_RULES,
 } from '../config.js';
 import { Rng, hashSeed } from './rng.js';
-import { difficultyFor, getDifficultyMode, stageDuration, stageTarget } from './levels.js';
+import { difficultyFor, getDifficultyMode, stageDuration, stageModifier, stageTarget } from './levels.js';
 import { isNegative, isScoring, normalisedWeights } from './items.js';
 import { CONTACT_Y, PAST_SCOOP_Y, cliffCells, fallProfile } from './cliff.js';
 import { maxReachableScore } from './reachability.js';
@@ -37,11 +43,21 @@ const HALF_WIDEST = (BASE_SCOOP_WIDTH * EFFECTS.expandFactor) / 2;
  */
 export const PAIR_SEPARATION = HALF_WIDEST * 0.6 + HALF_WIDEST + ROCK_OVERLAP + FAIRNESS.comfortMargin;
 
+/** Wide enough to cover the hazard window plus the longest linger beside the scoop. */
+const CHECK_WINDOW = Math.max(FAIRNESS.sameColumnSeconds, FAIRNESS.hazardWindow + 1, 1.2);
+
+function pickWeighted(rng, weights) {
+  const entries = Object.entries(weights);
+  let r = rng.next() * entries.reduce((sum, [, w]) => sum + w, 0);
+  for (const [key, w] of entries) if ((r -= w) < 0) return key;
+  return entries[entries.length - 1][0];
+}
+
 /** Shuffled bag with carried remainders so long-run frequencies match the weights. */
 class TypeBag {
-  constructor(level, rng) {
+  constructor(level, rng, modifier = null) {
     this.rng = rng;
-    this.weights = normalisedWeights(level);
+    this.weights = normalisedWeights(level, modifier);
     this.types = Object.keys(this.weights);
     this.carry = Object.fromEntries(this.types.map((t) => [t, 0]));
     this.items = [];
@@ -83,8 +99,7 @@ class TypeBag {
 /** Checks one candidate against already scheduled drops. Returns a reason string or null. */
 export function placementProblem(candidate, drops) {
   const candNeg = isNegative(candidate.type);
-  // Wide enough to cover the hazard window plus the longest linger beside the scoop.
-  const window = Math.max(FAIRNESS.sameColumnSeconds, FAIRNESS.hazardWindow + 1, 1.2);
+  const window = CHECK_WINDOW;
   const nearbyNegatives = candNeg ? [candidate] : [];
 
   for (let i = drops.length - 1; i >= 0; i--) {
@@ -139,6 +154,37 @@ export function largestSafeGap(hazardXs) {
   return Math.max(best, hi - cursor);
 }
 
+export function buildStorms(level, seed, duration) {
+  if (level < STORM.fromLevel) return [];
+  const rng = new Rng(hashSeed(seed, 'storm'));
+  const half = ARENA.halfWidth * STORM.width;
+  const slots = [half - ARENA.halfWidth, 0, ARENA.halfWidth - half];
+  const storms = [];
+  let last = -1;
+  const band = STORM.counts.filter((b) => level >= b.fromLevel).pop();
+  const count = rng.int(band.min, band.max);
+  const slot = (duration - STORM.firstAt - STORM.endMargin) / count;
+  const strike = Math.min(STORM.strikeSeconds, slot - STORM.warnSeconds - STORM.calmSeconds);
+  if (strike <= 0) return storms;
+  for (let n = 0; n < count; n++) {
+    const t = STORM.firstAt + n * slot + rng.range(0, slot - STORM.warnSeconds - strike - STORM.calmSeconds);
+    last = rng.pick([0, 1, 2].filter((i) => i !== last));
+    const strikeAt = t + STORM.warnSeconds;
+    storms.push({ x: slots[last], half, warnAt: t, strikeAt, endAt: Math.min(duration, strikeAt + strike) });
+  }
+  return storms;
+}
+
+export function stormProblem(type, x, arriveAt, storms) {
+  for (const s of storms) {
+    const dx = Math.abs(x - s.x);
+    if (isNegative(type)) {
+      if (arriveAt >= s.strikeAt - 0.3 && arriveAt <= s.endAt + 0.3 && dx > s.half - 1.5) return true;
+    } else if (arriveAt >= s.warnAt + 0.5 && arriveAt <= s.endAt + 0.3 && dx < s.half + 0.3) return true;
+  }
+  return false;
+}
+
 /** Re-checks a full schedule; used by tests and dev tooling. */
 export function findFairnessViolations(drops) {
   const sorted = [...drops].sort((a, b) => a.arriveAt - b.arriveAt);
@@ -166,10 +212,12 @@ function startPattern(diff, rng) {
   return { kind, remaining: 1 };
 }
 
-function buildDrops(level, seed, duration) {
+function buildDrops(level, seed, duration, modifier, storms) {
   const rng = new Rng(seed);
+  // Mystery outcomes come from their own stream so they never shift the rest of the schedule.
+  const surprise = new Rng(hashSeed(seed, 'mystery'));
   const diff = difficultyFor(level);
-  const bag = new TypeBag(level, rng);
+  const bag = new TypeBag(level, rng, modifier);
   const cells = cliffCells();
   const cellFreeAt = new Float64Array(cells.length);
   const drops = [];
@@ -193,13 +241,15 @@ function buildDrops(level, seed, duration) {
     return true;
   };
 
-  const chooseCell = (type, crackAt, arriveAt, preferX, pendingThisSlot, speeds = rowSpeed) => {
+  /** `fits(cell, existing)` replaces the single-rock fairness check (split rocks test both halves). */
+  const chooseCell = (type, crackAt, arriveAt, preferX, pendingThisSlot, speeds = rowSpeed, fits = null) => {
     const existing = pendingThisSlot.length ? drops.concat(pendingThisSlot) : drops;
     const valid = [];
     for (const cell of cells) {
       if (cellFreeAt[cell.id] > crackAt) continue;
       if (pendingThisSlot.some((d) => d.cellId === cell.id)) continue;
-      if (placementProblem({ type, x: cell.x, arriveAt, speed: speeds[cell.row] }, existing)) continue;
+      if (!fits && stormProblem(type, cell.x, arriveAt, storms)) continue;
+      if (fits ? !fits(cell, existing) : placementProblem({ type, x: cell.x, arriveAt, speed: speeds[cell.row] }, existing)) continue;
       valid.push(cell);
     }
     if (!valid.length) return null;
@@ -219,6 +269,16 @@ function buildDrops(level, seed, duration) {
       if (reachable.length) pool = reachable;
     }
     return rng.pick(pool);
+  };
+
+  /** Both halves of a split rock must land inside the arena and pass every fairness rule. */
+  const splitFits = (arriveAt) => (cell, existing) => {
+    const speed = rowSpeed[cell.row];
+    const a = { type: 'split', x: cell.x - SPLIT.offset, arriveAt, speed };
+    const b = { type: 'split', x: cell.x + SPLIT.offset, arriveAt, speed };
+    if (Math.max(Math.abs(a.x), Math.abs(b.x)) + ROCK.radius > ARENA.halfWidth) return false;
+    if (stormProblem('split', a.x, arriveAt, storms) || stormProblem('split', b.x, arriveAt, storms)) return false;
+    return !placementProblem(a, existing) && !placementProblem(b, existing.concat([a]));
   };
 
   let id = 0;
@@ -304,8 +364,9 @@ function buildDrops(level, seed, duration) {
     requests.forEach((req, k) => {
       const detachAt = t + crackTimes[k];
       const arriveAt = detachAt + fall;
+      let fromBag = !req.type;
       let type = req.type ?? bag.draw(accept);
-      if (!req.type && !accept(type)) {
+      if (fromBag && !accept(type)) {
         // The bag had no acceptable entry left (draw falls back to its first item):
         // swap in a scoring rock so the hazard/drought caps hold unconditionally.
         bag.putBack(type);
@@ -315,25 +376,32 @@ function buildDrops(level, seed, duration) {
           type = 'coin';
         }
       }
-      let cell = chooseCell(type, t, arriveAt, req.preferX, slot);
-      if (!cell && !req.type && isNegative(type)) {
+      const place = (kind) => chooseCell(kind, t, arriveAt, req.preferX, slot, rowSpeed, kind === 'split' ? splitFits(arriveAt) : null);
+      let cell = place(type);
+      if (!cell && type === 'split') {
+        // No room for both halves right now: keep the split for later and drop gold instead.
+        if (fromBag) bag.putBack(type);
+        type = 'coin';
+        fromBag = false;
+        cell = place(type);
+      }
+      if (!cell && fromBag && isNegative(type)) {
         // No fair place for this hazard right now: keep it for later and drop a positive instead.
         bag.putBack(type);
-        type = bag.draw((c) => !isNegative(c) && accept(c));
-        if (isNegative(type)) {
+        type = bag.draw((c) => !isNegative(c) && c !== 'split' && accept(c));
+        if (isNegative(type) || type === 'split') {
           bag.putBack(type);
           type = 'coin';
         }
-        cell = chooseCell(type, t, arriveAt, req.preferX, slot);
+        cell = place(type);
       }
       if (!cell) {
-        if (!req.type) bag.putBack(type);
+        if (fromBag) bag.putBack(type);
         return;
       }
       const { accel, speed } = fallProfile(cell.y, fall);
       const refillAt = detachAt + CLIFF.refillDelay;
-      slot.push({
-        id: id++,
+      const base = {
         type,
         cellId: cell.id,
         x: cell.x,
@@ -348,7 +416,29 @@ function buildDrops(level, seed, duration) {
         refillAt,
         refillEndAt: refillAt + CLIFF.refillSeconds,
         pattern: req.pattern || null,
-      });
+      };
+      if (type === 'split') {
+        // Two drops from one cell: they fall as one rock, then part to either side. The second
+        // half counts as a pattern extra, like the coins a sweep adds.
+        const pair = id;
+        for (const half of [-1, 1]) {
+          slot.push({
+            id: id++,
+            ...base,
+            x: cell.x + half * SPLIT.offset,
+            x0: cell.x,
+            driftStart: detachAt + fall * SPLIT.at,
+            driftEnd: detachAt + fall * SPLIT.settle,
+            half,
+            pair,
+            pattern: half > 0 ? 'split' : base.pattern,
+          });
+        }
+      } else {
+        const drop = { id: id++, ...base };
+        if (type === 'mystery') drop.reveal = pickWeighted(surprise, MYSTERY.outcomes);
+        slot.push(drop);
+      }
       cellFreeAt[cell.id] = refillAt + CLIFF.refillSeconds;
       negStreak = isNegative(type) ? negStreak + 1 : 0;
       nonScoringStreak = isScoring(type) ? 0 : nonScoringStreak + 1;
@@ -361,14 +451,67 @@ function buildDrops(level, seed, duration) {
 }
 
 /**
+ * Pushes rocks sideways for heat vents (volcano) and wind (windy stages) without touching the
+ * base schedule: types, timings, and source cells stay exactly as generated. Rocks are visited
+ * in arrival order and each pushed landing spot is re-checked against its neighbours (earlier
+ * ones already final, later ones not yet moved). A push that breaks a rule is halved, then
+ * dropped: staying put is always fair, because every earlier push was checked against it.
+ * Returns the wind direction (-1 or 1), or 0 without wind.
+ */
+function applyDrift(drops, seed, terrain, modifier, storms) {
+  const heat = TERRAIN_RULES[terrain]?.drift;
+  const wind = MODIFIERS[modifier]?.wind;
+  if (!heat && !wind) return 0;
+  const rng = new Rng(hashSeed(seed, 'drift'));
+  const windDir = wind ? (rng.chance(0.5) ? 1 : -1) : 0;
+  const order = [...drops].sort((a, b) => a.arriveAt - b.arriveAt || a.id - b.id);
+  const bound = ARENA.halfWidth - ROCK.radius;
+  let lo = 0;
+  for (let i = 0; i < order.length; i++) {
+    const d = order[i];
+    let shift = wind ? windDir * rng.range(wind.min, wind.max) : 0;
+    // Vents leave sweeps, stacks, and split halves alone; those already have a shape to keep.
+    // In a wind they push with it, so every rock on a windy stage still drifts downwind.
+    if (heat && (!d.pattern || d.pattern === 'pair') && !d.half && rng.chance(heat.chance)) {
+      shift += (windDir || (rng.chance(0.5) ? 1 : -1)) * rng.range(heat.min, heat.max);
+    }
+    shift = Math.max(-DRIFT.maxShift, Math.min(DRIFT.maxShift, shift));
+    if (!shift) continue;
+    while (order[lo].arriveAt < d.arriveAt - CHECK_WINDOW - 0.5) lo++;
+    let hi = i;
+    while (hi + 1 < order.length && order[hi + 1].arriveAt <= d.arriveAt + CHECK_WINDOW) hi++;
+    const neighbours = order.slice(lo, hi + 1).filter((o) => o !== d);
+    const from = d.x;
+    for (const s of [shift, shift / 2]) {
+      const x = from + s;
+      if (Math.abs(x) > bound || placementProblem({ ...d, x }, neighbours) || stormProblem(d.type, x, d.arriveAt, storms)) continue;
+      if (d.x0 === undefined) {
+        d.x0 = from;
+        d.driftStart = d.detachAt + d.fallSeconds * DRIFT.from;
+        d.driftEnd = d.detachAt + d.fallSeconds * DRIFT.to;
+      }
+      d.x = x;
+      break;
+    }
+  }
+  return windDir;
+}
+
+/**
  * Builds the full drop schedule for one stage. The target is dynamic: a level-dependent
  * share of the score this schedule's rocks actually offer along a reachable route.
+ * `terrain` applies its rule (heat-vent drift, or a slower route model on ice); the stage
+ * modifier defaults to the level's own.
  */
-export function generateStageSchedule(level, seed, { duration = stageDuration(level) } = {}) {
-  const drops = buildDrops(level, seed >>> 0, duration);
-  const reachableScore = maxReachableScore(drops);
-  const target = stageTarget(level, reachableScore);
-  return { level, seed: seed >>> 0, duration, target, drops, reachableScore };
+export function generateStageSchedule(level, seed, { duration = stageDuration(level), terrain = null, modifier = stageModifier(level) } = {}) {
+  const s = seed >>> 0;
+  const rules = TERRAIN_RULES[terrain];
+  const storms = buildStorms(level, s, duration);
+  const drops = buildDrops(level, s, duration, modifier, storms);
+  const wind = applyDrift(drops, s, terrain, modifier, storms);
+  const reachableScore = maxReachableScore(drops, { speedShare: FAIRNESS.reachSpeedShare * (rules?.reachFactor ?? 1) });
+  const target = stageTarget(level, reachableScore, (MODIFIERS[modifier]?.targetScale ?? 1) * (1 - STORM.targetPerStorm * storms.length));
+  return { level, seed: s, duration, target, drops, reachableScore, terrain: rules ? terrain : null, modifier, wind, storms };
 }
 
 const previewTargets = new Map();
@@ -377,8 +520,8 @@ const previewTargets = new Map();
  * Typical target for a level, for menus shown before a stage exists. Each run's real target
  * comes from its own seeded schedule and is usually within a few hundred points of this.
  */
-export function previewTarget(level) {
-  const key = `${getDifficultyMode()}|${level}`;
-  if (!previewTargets.has(key)) previewTargets.set(key, generateStageSchedule(level, hashSeed('preview', level)).target);
+export function previewTarget(level, terrain = null) {
+  const key = `${getDifficultyMode()}|${terrain}|${level}`;
+  if (!previewTargets.has(key)) previewTargets.set(key, generateStageSchedule(level, hashSeed('preview', level), { terrain }).target);
   return previewTargets.get(key);
 }

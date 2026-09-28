@@ -1,8 +1,12 @@
-// Versioned local save: unlocked level, best scores, stars, leaderboard, settings, and an
-// in-progress run snapshot. Every loaded value is validated; corrupt, older, or unavailable
-// storage falls back safely.
-import { LEVELS, THEMES } from './config.js';
+// Versioned local save: unlocked level, best scores, stars, leaderboard, trophies and lifetime
+// stats, settings, and an in-progress run snapshot. Every loaded value is validated; corrupt,
+// older, or unavailable storage falls back safely.
+import { LEVELS, MODIFIERS, THEMES } from './config.js';
 import { ITEM_TYPES } from './game/items.js';
+import { ACHIEVEMENT_IDS, emptyStats } from './achievements.js';
+
+/** First-encounter hint keys: item types, stage modifiers, and terrains. */
+const HINT_KEYS = new Set([...ITEM_TYPES, ...Object.keys(MODIFIERS), ...THEMES.map((t) => `terrain:${t}`)]);
 
 export const SAVE_KEY = 'avalanche.save';
 export const SAVE_VERSION = 2;
@@ -28,6 +32,10 @@ export function defaultSave() {
     endlessBest: 0,
     /** Snapshot of an in-progress run, taken at each stage start, for "Resume run". */
     resume: null,
+    /** Unlocked trophies: { id: 'YYYY-MM-DD' }. */
+    achievements: {},
+    /** Lifetime counters (see achievements.js emptyStats). */
+    stats: emptyStats(),
     settings: {
       sound: true,
       music: true,
@@ -39,11 +47,13 @@ export function defaultSave() {
       renderer: 'auto',
       difficulty: 'normal',
       pointerFollow: true,
+      haptics: true,
     },
     tutorialDone: false,
     seenTypes: [],
     theme: 'ice',
     selectedLevel: 1,
+    cart: null,
   };
 }
 
@@ -58,6 +68,22 @@ const vol = (v, fallback) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback;
 };
+
+function sanitizeStats(raw) {
+  const s = emptyStats();
+  if (!isObj(raw)) return s;
+  if (isObj(raw.caught)) {
+    for (const t of ITEM_TYPES) {
+      const n = intIn(raw.caught[t], 0, 1e12, 0);
+      if (n) s.caught[t] = n;
+    }
+  }
+  for (const key of ['points', 'clears', 'demonsDodged', 'bestCombo', 'bestWave', 'jackpots']) s[key] = intIn(raw[key], 0, 1e12, 0);
+  const seconds = Number(raw.playSeconds);
+  s.playSeconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 1e9) : 0;
+  if (Array.isArray(raw.terrains)) s.terrains = THEMES.filter((t) => raw.terrains.includes(t));
+  return s;
+}
 
 /** {level: score} map with only valid levels and scores kept. */
 function levelMap(src, maxValue) {
@@ -82,7 +108,7 @@ export function sanitizeSave(raw) {
   }
 
   save.unlockedLevel = intIn(raw.unlockedLevel, 1, LEVELS.count, 1);
-  save.selectedLevel = Math.min(save.unlockedLevel, intIn(raw.selectedLevel, 1, LEVELS.count, 1));
+  save.selectedLevel = Math.min(save.unlockedLevel, intIn(raw.selectedLevel, 0, LEVELS.count, 1));
 
   // Version 1 kept bests per terrain; schedules were always terrain-independent, so the
   // migration keeps each level's highest score across terrains.
@@ -134,6 +160,13 @@ export function sanitizeSave(raw) {
     const valid = snap.seed >= 0 && snap.level && snap.startLevel && snap.lives && snap.bank >= 0 && snap.restoresUsed >= 0 && snap.stagesCleared >= 0 && snap.totalScore >= 0;
     if (valid) save.resume = snap;
   }
+  if (isObj(raw.achievements)) {
+    for (const id of ACHIEVEMENT_IDS) {
+      const date = raw.achievements[id];
+      if (typeof date === 'string' && date) save.achievements[id] = date.slice(0, 10);
+    }
+  }
+  save.stats = sanitizeStats(raw.stats);
 
   if (isObj(raw.settings)) {
     const s = raw.settings;
@@ -147,10 +180,12 @@ export function sanitizeSave(raw) {
     save.settings.renderer = oneOf(s.renderer, RENDERER_VALUES, 'auto');
     save.settings.difficulty = oneOf(s.difficulty, DIFFICULTY_VALUES, 'normal');
     save.settings.pointerFollow = bool(s.pointerFollow, true);
+    save.settings.haptics = bool(s.haptics, true);
   }
   save.tutorialDone = bool(raw.tutorialDone, false);
-  if (Array.isArray(raw.seenTypes)) save.seenTypes = [...new Set(raw.seenTypes.filter((t) => ITEM_TYPES.includes(t)))];
+  if (Array.isArray(raw.seenTypes)) save.seenTypes = [...new Set(raw.seenTypes.filter((t) => HINT_KEYS.has(t)))];
   save.theme = oneOf(raw.theme, THEMES, 'ice');
+  save.cart = raw.cart == null ? null : intIn(raw.cart, 0, 99, null);
   return save;
 }
 
@@ -284,8 +319,13 @@ export class SaveStore {
     this.save();
   }
 
+  setCart(tier) {
+    this.data.cart = tier;
+    this.save();
+  }
+
   setSelectedLevel(level) {
-    this.data.selectedLevel = Math.min(this.data.unlockedLevel, Math.max(1, level));
+    this.data.selectedLevel = Math.min(this.data.unlockedLevel, Math.max(0, level));
     this.save();
   }
 
@@ -301,7 +341,16 @@ export class SaveStore {
     return true;
   }
 
-  /** Clears progress (unlocks, bests, stars, scores, hints) but keeps settings and terrain. */
+  hasAchievement(id) {
+    return !!this.data.achievements[id];
+  }
+
+  /** Lifetime counters; mutated in place by the trophy tracker and saved with the rest. */
+  get stats() {
+    return this.data.stats;
+  }
+
+  /** Clears progress (unlocks, bests, stars, scores, trophies, stats, hints) but keeps settings and terrain. */
   resetProgress() {
     const settings = { ...this.data.settings };
     const theme = this.data.theme;

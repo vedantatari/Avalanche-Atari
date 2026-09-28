@@ -3,6 +3,8 @@
 // The miner sits a little behind the gameplay plane so falling rocks always draw in front.
 import * as THREE from '../../../vendor/three/three.module.min.js';
 import { Rng, hashSeed } from '../../game/rng.js';
+import { BASE_SCOOP_WIDTH } from '../../config.js';
+import { CART_SLICES, CART_TIERS, cartSliceXs } from '../appearance.js';
 
 const WHEEL_R = 0.34;
 /** Tub height below the rim (the rim top is the catch plane, y = 0 in the scoop root). */
@@ -151,7 +153,8 @@ export class CartModel {
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -TUB_H + 0.02;
     // Heavy rolled lip around the rim.
-    const lip = new THREE.Mesh(new THREE.CylinderGeometry(TUB_R * 1.035, TUB_R * 1.02, 0.12, 4, 1, true, Math.PI / 4), mat('#5a6168', { roughness: 0.45, metalness: 0.4, side: THREE.DoubleSide }));
+    const lipMat = mat('#5a6168', { roughness: 0.45, metalness: 0.4, side: THREE.DoubleSide });
+    const lip = new THREE.Mesh(new THREE.CylinderGeometry(TUB_R * 1.035, TUB_R * 1.02, 0.12, 4, 1, true, Math.PI / 4), lipMat);
     lip.position.y = -0.05;
     for (const m of [tub, inner, lip]) {
       m.castShadow = true;
@@ -191,6 +194,16 @@ export class CartModel {
     }
 
     this._buildMiner();
+    this.mats = { steel, lip: lipMat, frame: dark, hub };
+    this._buildFeatures();
+    this.group.updateMatrixWorld(true);
+    const size = new THREE.Vector3();
+    this.group.traverse((o) => {
+      if (!o.isMesh || !o.castShadow) return;
+      o.geometry.computeBoundingSphere();
+      o.getWorldScale(size);
+      if (o.geometry.boundingSphere.radius * Math.max(size.x, size.y, size.z) < 0.16) o.castShadow = false;
+    });
 
     this.wheelAngle = 0;
     this.lean = 0;
@@ -292,6 +305,65 @@ export class CartModel {
     this.scoopRoot.add(m);
   }
 
+  _buildFeatures() {
+    const r = (y) => TUB_R * (1 - (0.2 * -y) / TUB_H) * 1.012;
+    this.mats.accent = mat('#ffffff', { roughness: 0.5 });
+    this.stripe = new THREE.Mesh(new THREE.CylinderGeometry(r(-0.34), r(-0.5), 0.16, 4, 1, true, Math.PI / 4), this.mats.accent);
+    this.stripe.position.y = -0.42;
+    this.scoop.add(this.stripe);
+    this.flatGeo = new THREE.BufferGeometry();
+    this.flatGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(CART_SLICES.length * 6), 3));
+    this.flatGeo.setAttribute('uv', new THREE.Float32BufferAttribute(CART_SLICES.flatMap((u) => [u, 1, u, 0]), 2));
+    const index = [];
+    for (let i = 0; i < CART_SLICES.length - 1; i++) index.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 2, i * 2 + 1, i * 2 + 3);
+    this.flatGeo.setIndex(index);
+    this.flat = new THREE.Mesh(this.flatGeo, new THREE.MeshBasicMaterial({ transparent: true, alphaTest: 0.05, toneMapped: false, fog: false, side: THREE.DoubleSide }));
+    this.flat.userData.flat = true;
+    this.flatRoot = new THREE.Group();
+    this.flatRoot.position.z = -0.2;
+    this.flatRoot.add(this.flat);
+    this.group.add(this.flatRoot);
+    this.setTier(0);
+  }
+
+  setTier(tier) {
+    const p = CART_TIERS[tier] && !CART_TIERS[tier].sprite ? CART_TIERS[tier] : CART_TIERS[0];
+    this.mats.steel.color.set(p.tub).multiplyScalar(p === CART_TIERS[0] ? 1 : 1.5);
+    this.mats.lip.color.set(p.lip);
+    this.mats.frame.color.set(p.frame);
+    this.mats.hub.color.set(p.hub);
+    this.mats.accent.color.set(p.accent);
+    this.stripe.visible = p.stripe;
+    this.setSprite(null);
+  }
+
+  setSprite(texture, meta = null) {
+    this.flatMeta = meta;
+    this.flatWidth = null;
+    this.flat.material.map = texture;
+    this.flat.material.needsUpdate = true;
+    this.flat.visible = !!texture;
+    this.flatRoot.matrixWorldAutoUpdate = !!texture;
+    for (const o of [this.body, this.scoop, this.driver, ...this.wheels]) {
+      o.visible = !texture;
+      o.matrixWorldAutoUpdate = !texture;
+    }
+  }
+
+  _layoutFlat(width) {
+    const m = this.flatMeta;
+    const h = 1.75 / (0.994 - m.rim);
+    const xs = cartSliceXs(width, BASE_SCOOP_WIDTH, h * m.aspect);
+    const pos = this.flatGeo.attributes.position;
+    xs.forEach((x, i) => {
+      pos.setXYZ(i * 2, x, m.rim * h, 0);
+      pos.setXYZ(i * 2 + 1, x, -(1 - m.rim) * h, 0);
+    });
+    pos.needsUpdate = true;
+    this.flatGeo.computeBoundingSphere();
+    this.flatWidth = width;
+  }
+
   /**
    * Turns this cart into a see-through shadow clone. Every mesh gets a depth-only twin that
    * draws first, so only the clone's front surfaces blend: it reads as one cart at the given
@@ -306,6 +378,10 @@ export class CartModel {
     this.ghostMaterials = new Set();
     for (const mesh of meshes) {
       const mat = mesh.material;
+      if (mesh.userData.flat) {
+        this.ghostMaterials.add(mat);
+        continue;
+      }
       if (!this.ghostMaterials.has(mat)) {
         mat.transparent = true;
         mat.depthWrite = false;
@@ -327,6 +403,7 @@ export class CartModel {
   setOpacity(alpha) {
     for (const m of this.ghostMaterials) m.opacity = alpha;
     this.group.visible = alpha > 0.005;
+    this.group.matrixWorldAutoUpdate = this.group.visible;
   }
 
   setWidth(width) {
@@ -419,12 +496,30 @@ export class CartModel {
     const shakeX = this.shake > 0 ? Math.sin(time * 70) * 0.06 * (this.shake / 0.35) : 0;
     this.group.position.x = x + shakeX;
 
-    // Gentle outline-like pulse while immune (no harsh strobing).
+    // Gentle outline-like pulse while immune (no harsh strobing); an icy tint while frozen.
     const glow = s.invulnerable ? (this.reducedMotion ? 0.2 : 0.12 + 0.12 * (0.5 + 0.5 * Math.sin(time * 9))) : 0;
+    const frost = s.frozen ? 0.38 : 0;
     for (const m of this.glowMaterials) {
-      m.emissive.setRGB(1, 0.95, 0.85);
-      m.emissiveIntensity = glow;
+      if (frost > glow) m.emissive.setRGB(0.55, 0.82, 1);
+      else m.emissive.setRGB(1, 0.95, 0.85);
+      m.emissiveIntensity = Math.max(glow, frost);
     }
     this.lampLight.material.emissiveIntensity = 1.2 + (this.reducedMotion ? 0 : Math.max(0, Math.sin(time * 3)) * 0.6);
+    if (this.flat.visible) {
+      if (this.flatWidth !== s.width) this._layoutFlat(s.width);
+      const f = this.flatRoot;
+      f.position.y = sp * 0.12 + cheer * 0.1;
+      f.scale.y = 1 + sp * 0.06;
+      f.rotation.z = this.lean * 0.3 + flinch;
+      if (this.ejectT !== null) {
+        const t = Math.min(this.ejectT / 0.5, 1);
+        f.rotation.z = this.ejectDir * t * 0.45;
+        f.position.y -= t * 0.25;
+      }
+      const c = this.flat.material.color;
+      if (this.hit > 0) c.setRGB(1.35, 0.75, 0.7);
+      else if (frost > glow) c.setRGB(0.75, 0.92, 1.2);
+      else c.setScalar(1 + glow * 1.5);
+    }
   }
 }

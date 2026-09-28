@@ -1,6 +1,6 @@
 # Avalanche — Game Flow & Design
 
-A browser remake of Atari's arcade classic **Avalanche**, built in plain HTML, CSS, and JavaScript.
+A browser remake of the arcade classic **Avalanche**, built in plain HTML, CSS, and JavaScript.
 Rocks crack loose from a snowy cliff; you steer a bearded miner's mine cart so its open tub catches
 the valuable rocks and lets the harmful ones fall. This document explains the problem the game solves,
 how the game flows, how to play it, and how the design answers the original brief.
@@ -11,7 +11,7 @@ For setup, folder structure, and running the game locally, see [README.md](READM
 
 ## 1. The problem statement
 
-Recreate the spirit of Atari's *Avalanche* (1978) — falling objects, a player-controlled catcher, and
+Recreate the spirit of the 1978 arcade classic *Avalanche* — falling objects, a player-controlled catcher, and
 escalating pressure — as a **modern browser arcade game** that:
 
 1. **Runs anywhere with zero friction.** It must open in a normal browser on desktop, tablet, or phone,
@@ -35,13 +35,14 @@ Section 5 maps each of these requirements to how the game meets it.
                 ┌────────────────────────────────────────────┐
                 │                  MENU                      │
                 │  Play / Resume run · All levels · Endless  │
-                │  Daily · Scores · Terrain · Legend         │
-                │  How to play · Settings · Full screen      │
+                │  Daily · Scores · Trophies · Terrain       │
+                │  Legend · How to play · Settings           │
+                │  Full screen · Install app                 │
                 └───────┬────────────────────────────────────┘
                         │ Play (first ever play shows the
                         │ "Before you start" tutorial first)
                         ▼
-   ┌──────────── LEVEL INTRO ────────────┐   "LEVEL N · Reach ~T in 0:45 · Get ready…"
+   ┌──────────── LEVEL INTRO ────────────┐   "LEVEL N · Reach ~T in 0:45 · [terrain rule] [weather] · Get ready…"
    │                                     │
    ▼                                     │
  PLAYING ──── Esc / P / focus loss ──► PAUSED ──► Resume · Restart · Quit to menu
@@ -61,7 +62,8 @@ Section 5 maps each of these requirements to how the game meets it.
 
 ### A stage, beat by beat
 
-1. **Intro banner** (~1.3 s): shows the level number and its score target, e.g. "Reach ~850 in 0:45".
+1. **Intro banner** (~1.3 s): shows the level number, its score target (e.g. "Reach ~850 in 0:45"),
+   and the rules in play: the terrain's rule and, on weather levels, the stage modifier.
 2. **Play**: every stage runs on a **45-second clock**. Rocks visibly crack and shake on the cliff
    shelves before detaching, giving you a moment to react, then fall toward the rail.
 3. **Catching**: a rock counts the instant it touches the cart's tub — its bottom reaching the rim
@@ -88,10 +90,35 @@ Section 5 maps each of these requirements to how the game meets it.
 |---|---|
 | **Campaign** | 100 levels. Clear a level to unlock the next. Best score and stars per level are remembered on the level grid, shared across both terrains. |
 | **Endless** | Starts at wave 1 with **no score target**; when each 45 s timer ends the run rolls into a harder wave. The run ends only when you die, and the cumulative total goes to the high-score table. |
-| **Daily** | One stage seeded from today's date — the same rocks, in the same order, for everyone, all day. Retrying replays the exact same stage. |
+| **Daily** | One stage seeded from today's date — the same rocks, in the same order, on the same terrain, for everyone, all day. The daily picks its own terrain (the scene switches to it for the daily only). Retrying replays the exact same stage. |
 
-A local **high-score table** keeps the ten best finished runs. **Terrain** (Ice or Volcano) is a visual
-choice — the same seeded schedule plays identically on either.
+A local **high-score table** keeps the ten best finished runs, and the **Trophies** screen shows every
+trophy (unlocked ones with their date, locked ones with what to do) plus lifetime stats.
+
+### Terrains: one rule each
+
+**Terrain** (Ice or Volcano) changes the look *and* one rule. Terrain never changes which rocks fall,
+from which cell, or when — only how the cart handles (Ice) or where some rocks land (Volcano).
+
+| Terrain | Rule | What it means |
+|---|---|---|
+| **Ice** | Slippery rail | The cart speeds up, brakes, and turns with less grip, and glides on for a moment after you let go (top speed is unchanged). Pointer and drag steering ease the cart onto the target without overshooting. |
+| **Volcano** | Heat vents | About half of the rocks that aren't part of a sweep or stack get pushed sideways mid-fall. A pushed rock's tag carries an arrow (e.g. "+50 →") from the moment it cracks, and it lands straight after the push. |
+
+Every pushed landing spot is re-checked against the fairness rules; a push that would break one is
+halved, then dropped. Ice's reachable-score model assumes slower routes, so its targets are a little
+lower.
+
+### Weather: stage modifiers
+
+Campaign levels whose number ends in **4**, **7**, or **9** carry weather (marked in the level grid);
+Endless waves and the Daily inherit their level's weather.
+
+| Weather | Levels | Effect |
+|---|---|---|
+| **Windy** ≋ | 4, 14, 24… | Every rock drifts with one stage-wide wind (heat vents push with it, never against it). Blown snow streaks show the direction. |
+| **Fog** ☁ | 7, 17, 27… | A mist bank covers the upper arena: rocks show their marking and tag only once they fall below it. Targets are eased by 8%. |
+| **Gold rush** ✦ | 9, 19, 29… | More gold and emerald rocks — and more fire. |
 
 ## 3. How to play
 
@@ -105,7 +132,8 @@ choice — the same seeded schedule plays identically on either.
 | Full screen on/off | F | Full screen button (menu and pause screen) |
 
 While **Reverse** (the whiskey bottle) is active, every movement method is flipped — left means right,
-pointer-follow mirrors about the centre — and a "⇄ REVERSED" badge counts down above the cart.
+pointer-follow mirrors about the centre — and a "⇄ REVERSED" badge counts down above the cart. On
+**Ice** the cart glides on briefly after you let go; while **frozen** (frost rock) it moves at half speed.
 
 ### The rocks
 
@@ -123,6 +151,10 @@ Every falling rock carries a marking. The in-game legend (menu and How to play) 
 | Whiskey bottle | ⚠️ avoid | Reverses all controls for 5 s |
 | ×2 / ×3 / ×5 rock | ✅ | Multiplies every point scored for 5 s. A new multiplier replaces the current one and restarts the 5 s. The score pill shows the active multiplier. |
 | Shadow rock | ✅ | Adds two shadow-clone carts at 70% opacity, one on each side of yours, for 5 s. Clones catch helpful rocks only — harmful rocks fall straight through them. |
+| Split rock (from level 2) | ✅ | Falls as one rock, then cracks in two a third of the way down; the halves land 0.8 either side of its column. Each half is +40 and a combo step — a centred cart takes both. |
+| Magnet (from level 3) | ✅ | For 5 s, helpful rocks up to 1.6 beyond your scoop's reach are pulled in (a glowing ring shows the reach). Hazards are never pulled. |
+| **?** rock (from level 5) | ⚠️ gamble | A seeded surprise, revealed on the catch: a 250-point jackpot (multiplied like any score), a shield, wide scoop, ×3, magnet, or clones — or a nuisance (narrow scoop, reverse, frost). It never costs a heart. |
+| Frost rock (from level 8) | ⚠️ avoid | Freezes the wheels: half top speed for 4 s. |
 
 ### Hearts, shields, and restores
 
@@ -133,8 +165,9 @@ Every falling rock carries a marking. The in-game legend (menu and How to play) 
 
 ### Scoring extras
 
-- **Combo streak**: consecutive catches of scoring rocks (gold/emerald) build a streak; every 5th
-  catch pays a rising bonus (+50, +100, +150…). Missing a scoring rock or taking damage resets it.
+- **Combo streak**: consecutive catches of scoring rocks (gold, emerald, split halves) build a
+  streak; every 5th catch pays a rising bonus (+50, +100, +150…). Missing a scoring rock or taking
+  damage resets it.
 - **Stars**: a campaign win is rated by the share of that stage's *reachable* score you collected —
   **2★ at ≥ 75%, 3★ at ≥ 90%**.
 - **Score targets are dynamic**: each stage computes the best score a human-speed route could collect
@@ -149,11 +182,24 @@ that applies from the next stage. Independently, the campaign curve itself ramps
 rocks faster and more often, fall times shorten, and multi-rock patterns (sweeps, pairs, stacks)
 become more frequent.
 
+### Trophies and lifetime stats
+
+27 trophies reward milestones and skill: a first clear, clearing without losing a heart, 3 stars,
+10- and 25-catch streaks, banking 8 shields, a comeback from the revive prompt, 5 clears in one run
+without a restore, dodging 10 demons in a run, 500 points in one ×5 window, 3 catches with one set of
+clones, both halves of a split rock, 3 magnet pulls, a mystery jackpot, clearing on both terrains and
+in each weather, level milestones (10 / 25 / 50 / 100), Endless wave 5, a Daily clear, a Hard clear,
+and two lifetime goals (1,000 gold rocks, 100,000 points) with progress bars. A trophy earned
+mid-stage shows as a toast; those earned at the end appear on the result card. Lifetime stats
+(clears, points, rocks caught, best streak, demons dodged, best wave, jackpots, time played) sit on
+the Trophies screen. Resetting progress clears both.
+
 ## 4. Tutorial — your first game, step by step
 
-1. **Open the game** (see [README.md](README.md)) — you land on the menu. Pick a **terrain** (Ice or
-   Volcano — looks only, same gameplay) and skim the **rock legend** so you know gold/emerald/shield
-   from fire and the demon. Press **Full screen** (or F) if you like.
+1. **Open the game** (see [README.md](README.md)) — you land on the menu. Pick a **terrain** (Ice's
+   cart glides on a slippery rail; Volcano's heat vents push some rocks sideways) and skim the **rock
+   legend** so you know gold/emerald/shield from fire and the demon. Press **Full screen** (or F) if
+   you like.
 2. **Press Play.** Because it's your first game, the **"Before you start"** panel appears: the core
    rule — *steer the cart so the teal scoop catches the good rocks and lets the bad ones fall* — plus
    the controls. Press **Start**. (It's always available later under **How to play**.)
@@ -182,13 +228,18 @@ become more frequent.
 - The cart crosses the whole arena in 0.8 s — trust that you can make almost any rock if you commit early.
 - The **+** rock (wider scoop) is quietly one of the best pickups; the **−** rock is a trap that looks similar — read the marking, not just the colour.
 - While **reversed**, slow down and make small corrections; five seconds passes quickly.
+- On **Ice**, let go a moment early — the cart glides into place. On **Volcano**, read the arrow on a rock's tag before it drops: that's where the vent will push it.
+- Centre the cart under a **split rock** just before it cracks and both halves land in the tub.
 - On a phone: hold the left or right half of the screen — don't swipe. A second finger can tap Restore without letting go.
 
 ## 5. How the solution addresses the problem statement
 
 **Zero-friction, runs anywhere.** The deliverable is static files — `index.html`, `css/`, `src/`
 (ES modules), `vendor/` (Three.js, vendored, no CDN), `assets/`. There is no build step, backend,
-account, analytics, or runtime download; the game works fully offline once served. The layout fills
+account, analytics, or runtime download. It is an installable **PWA**: a web manifest and a small
+network-first service worker ([sw.js](sw.js)) cache the whole game on the first visit, so it
+installs to a home screen or desktop (an **Install app** button appears where the browser offers it)
+and plays offline, while online visits always pick up the latest deploy. The layout fills
 any window, adapts its HUD across wide/mid/compact/short breakpoints, keeps touch targets ≥ 44 px,
 and was screenshot-verified from 360×640 phones up to 1920×1080 desktops
 (see [docs/verification/](docs/verification/)).
@@ -207,11 +258,19 @@ and was screenshot-verified from 360×640 phones up to 1920×1080 desktops
    reachable scoring was 5–7× the target and a player who never moved could still win — under the
    current tuning, a motionless or randomly-mashing player loses every sampled stage.
 
+The newer mechanics sit inside the same three layers: split halves are placed only where both pass
+every rule, heat-vent and wind pushes are re-checked landing by landing (falling back to a smaller
+push, or none), mystery outcomes are drawn from a separate seeded stream (so they never reshuffle
+the rest of the stage), and Ice and Fog lower the target where they make routes harder than the
+model assumes. A greedy balance bot wins about as often on Ice, Volcano, and weather levels as on
+plain ones.
+
 **Lasting progression and replay.** 100 campaign levels with per-level best scores and 1–3 star
-ratings, escalating speed/density/patterns, and two terrains; an Endless mode with rolling waves; a
-date-seeded Daily identical for all players; a ten-entry local high-score table; and a resume-run
-snapshot so a closed tab never destroys a campaign run. All persistence is `localStorage` — private
-and offline.
+ratings, escalating speed/density/patterns, four rocks introduced over the first eight levels, two
+terrains with their own rules, and weather on every level ending in 4, 7, or 9; an Endless mode with
+rolling waves; a date-seeded Daily identical for all players (terrain included); 27 trophies and
+lifetime stats; a ten-entry local high-score table; and a resume-run snapshot so a closed tab never
+destroys a campaign run. All persistence is `localStorage` — private and offline.
 
 **Modern look with graceful degradation.** A Three.js WebGL scene with a living background (wind
 gusts, cliff slides, snow curtains, birds, cloud shadows, eruptions) that runs strictly behind the
@@ -225,27 +284,31 @@ identical on every device and frame rate.
 
 - **Determinism**: every stage is generated from a seed by a dedicated RNG
   ([src/game/rng.js](src/game/rng.js)) — the same seed always produces the same rocks. This is what
-  makes the Daily fair, "Retry" exact, resume reliable, and the 82-test rule suite possible.
+  makes the Daily fair, "Retry" exact, resume reliable, and the rule test suite possible.
 - **Accessibility & comfort**: a Reduced-motion setting (no shake, calm background, fewer particles),
   pointer-follow toggle, volume sliders (master/effects/music), ARIA-labelled controls, and pause on
   focus loss, tab switch, or orientation change — the loop never replays a long gap, so nothing
-  happens while you're not looking.
+  happens while you're not looking. On phones and tablets that support it, short **vibrations**
+  confirm catches, combos, hits, stage ends, and trophies (a Vibration setting turns them off).
 - **Audio** is procedural Web Audio (no audio files); it starts after the first user gesture and
   fails silently where unavailable.
 - **Settings** persist locally: difficulty, sound/music and volumes, reduced motion, pointer-follow,
-  graphics quality (Auto/High/Medium/Low), renderer (Auto/3D/2D), plus a guarded full progress reset.
+  vibration (touch devices), graphics quality (Auto/High/Medium/Low), renderer (Auto/3D/2D), plus a
+  guarded full progress reset.
 - **Tuning lives in one file**: nearly every gameplay number — timings, weights, speeds, restore
   costs, difficulty curves, fairness margins — is in [src/config.js](src/config.js), and item
   *effects* ([src/game/items.js](src/game/items.js)) are kept separate from item *appearance*
   ([src/render/appearance.js](src/render/appearance.js)), so rebalancing or reskinning never touches
   simulation code.
-- **Verification**: 82 Vitest rule tests and 42 Playwright browser checks cover the rules above —
+- **Verification**: 116 Vitest rule tests and 48 Playwright browser checks cover the rules above —
   catches at the deadline, restore costs, reverse across input methods, resume snapshots, fairness
-  and reachability of seeded schedules, renderer switching, corrupt storage, and more. See
+  and reachability of seeded schedules (on both terrains and every weather), ice handling, the new
+  rocks, trophies, vibration, offline play, renderer switching, corrupt storage, and more. See
   [README.md](README.md) for how to run them, and [docs/verification/](docs/verification/) for
   screenshots and a real 10-second gameplay recording.
-- **Known limitations**: mobile behaviour was verified through Chrome/Edge device emulation, not
-  physical phones; Firefox and Safari are untested; performance numbers come from one integrated
-  GPU; and late-campaign balance is bot-tested rather than human-playtested (tune
-  `LEVELS.targetShare` / `LEVELS.difficultyOffset` in [src/config.js](src/config.js) if levels
-  50+ prove too hard).
+- **Known limitations**: mobile behaviour (including vibration and home-screen install) was verified
+  through Chrome/Edge device emulation, not physical phones; iOS Safari has no vibration API, so
+  haptics are Android/Chromium only; Firefox and Safari are untested; performance numbers come from
+  one integrated GPU; and late-campaign balance is bot-tested rather than human-playtested (tune
+  `LEVELS.targetShare` / `LEVELS.difficultyOffset`, `TERRAIN_RULES`, and `MODIFIERS` in
+  [src/config.js](src/config.js) if levels prove too hard).

@@ -1,15 +1,18 @@
 // Canvas 2D fallback renderer. Same simulation, same logical layout, simpler visuals.
 // Used automatically when WebGL cannot start, or when chosen in Settings.
-import { ARENA, CART_MAX_SPEED, TICK_RATE, CLIFF, EFFECTS, LIFE, ROCK } from '../config.js';
-import { cliffCells, dropYAt } from '../game/cliff.js';
+import { ARENA, BASE_SCOOP_WIDTH, CART_MAX_SPEED, TICK_RATE, CLIFF, EFFECTS, LIFE, MODIFIERS, ROCK } from '../config.js';
+import { cliffCells, dropXAt, dropYAt } from '../game/cliff.js';
 import { Rng, hashSeed } from '../game/rng.js';
 import { clonePositions } from '../game/simulation.js';
-import { appearanceOf, effectBadges } from './appearance.js';
+import { CART_SLICES, CART_TIERS, appearanceOf, cartSliceXs, effectBadges, revealPopup } from './appearance.js';
+import { loadCartImage } from './assets.js';
 import { themeInfo } from './themes.js';
-import { computeLayout } from './layout.js';
 import { drawBottle, drawEmblem, labelCanvas, makeCanvas, veinCanvas } from './emblems.js';
 
 const DT = 1 / TICK_RATE;
+const HW = ARENA.halfWidth;
+const S = ROCK.blockScale;
+const SPACING = CLIFF.columnSpacing;
 const CELLS = cliffCells();
 const CAM_Z = ARENA.gameZ + ARENA.cameraDistance;
 const depthScale = (z) => (CAM_Z - ARENA.gameZ) / (CAM_Z - z);
@@ -19,6 +22,16 @@ const FALL_SCALE = ROCK.fallingScale;
 /** Falling boxes stretch to a wider card-like aspect so the marking has more room. */
 const STRETCH_X = ROCK.fallingStretch.x;
 const STRETCH_Y = ROCK.fallingStretch.y;
+/** Each half of a split rock is drawn at this share of a whole rock. */
+const HALF_SCALE = 0.8;
+/** Side a pushed rock is still drifting toward (-1 / 1), or 0; split halves need no arrow. */
+const driftDir = (d, T) => (d.x0 !== undefined && !d.half && T < d.driftEnd ? Math.sign(d.x - d.x0) : 0);
+const STORM_COLORS = {
+  ice: { top: '200,228,255', bottom: '226,244,255', edge: '190,240,255', glow: '#8fe4ff', cloud: '70,84,110', stripeBg: '20,40,70', stripe: '140,225,255', bandTop: '235,248,255', bandBottom: '190,230,255', streak: '255,255,255' },
+  lava: { top: '255,110,30', bottom: '255,150,50', edge: '255,180,70', glow: '#ff7a1c', cloud: '60,48,44', stripeBg: '50,20,10', stripe: '255,140,40', bandTop: '255,190,80', bandBottom: '220,70,20', streak: '255,200,80' },
+};
+/** A tag pill, with an arrow toward the drift side when the rock will be pushed. */
+const tagText = (tag, dir) => (dir > 0 ? `${tag.text} →` : dir < 0 ? `← ${tag.text}` : tag.text);
 
 function rockOutline(variant) {
   const rng = new Rng(hashSeed('outline', variant));
@@ -76,6 +89,30 @@ export class Renderer2D {
     this.ghostCanvas = null;
     this.reducedMotion = !!opts.reducedMotion;
     this.schedule = null;
+    /** Per-stage one-shot effects: rocks already puffed by a vent or revealed by the fog. */
+    this.pushed = new Set();
+    this.revealed = new Set();
+    this.streaks = [];
+    this.stageWind = 0;
+    this.lastV = 0;
+    this.cartTier = 0;
+    this.bolts = [];
+    this.flashLevel = 0;
+    this.nextBolt = 0;
+    this.stormFrozen = false;
+    const rng = new Rng(hashSeed('storm2d'));
+    this.snow = Array.from({ length: 70 }, () => ({ x: rng.next(), y: rng.next(), l: rng.range(0.15, 0.4), v: rng.range(0.6, 1.2) }));
+  }
+
+  setCartTier(tier) {
+    if (tier === this.cartTier) return;
+    this.cartTier = tier;
+    this.cartSprite = null;
+    const meta = CART_TIERS[tier];
+    if (!meta?.sprite) return;
+    loadCartImage(meta.sprite).then((img) => {
+      if (img && this.cartTier === tier) this.cartSprite = { img, meta };
+    });
   }
 
   setTheme(id) {
@@ -215,8 +252,8 @@ export class Renderer2D {
     }
 
     // Central wall pillars.
-    for (let x = -12; x < 12; ) {
-      const w = rng.range(1, 1.7);
+    for (let x = -(HW + 4); x < HW + 4; ) {
+      const w = rng.range(1, 1.7) * S;
       const tl = P(x, 30);
       ctx.fillStyle = rng.pick(T.wall);
       ctx.fillRect(tl.x, tl.y, w * s + 1, 34 * s);
@@ -226,7 +263,7 @@ export class Renderer2D {
     }
 
     const block = (x, y, scale = 1, color, cap = true) => {
-      const px = Math.round(1.36 * s * scale);
+      const px = Math.round(1.36 * S * s * scale);
       const q = P(x, y);
       const sprite = this._plainBlock(color, px, cap);
       ctx.drawImage(sprite, q.x - sprite.width / 2 / this.dpr, q.y - sprite.height / 2 / this.dpr, sprite.width / this.dpr, sprite.height / this.dpr);
@@ -235,18 +272,18 @@ export class Renderer2D {
 
     // Upper cliff blocks (smaller as they recede).
     for (let r = 10; r >= 0; r--) {
-      const y = 11.9 + r * 1.12;
+      const y = 11.9 + r * 1.12 * S;
       const sc = depthScale(-3.3 - r * 0.3);
-      for (let x = -12 + (r % 2 ? 0.72 : 0); x <= 12; x += 1.44) block(x * sc, 6.5 + (y - 6.5) * sc, sc, rng.pick(T.block), caps);
+      for (let x = -(HW + 4) + (r % 2 ? SPACING / 2 : 0); x <= HW + 4; x += SPACING) block(x * sc, 6.5 + (y - 6.5) * sc, sc, rng.pick(T.block), caps);
     }
     // Shelf ledges and dark sockets.
     CLIFF.rows.forEach((row) => {
       const sc = depthScale(row.z);
-      for (let x = -9.4; x <= 9.4; x += 1.2) block(x, row.y - 0.78 * sc, sc * 0.9, shade(T.block[0], -0.1), false);
+      for (let x = -(HW + 1.4); x <= HW + 1.4; x += 1.2 * S) block(x, row.y - 0.78 * S * sc, sc * 0.9, shade(T.block[0], -0.1), false);
     });
     for (const cell of CELLS) {
       const q = P(cell.x, cell.y);
-      const sc = depthScale(cell.z) * s;
+      const sc = depthScale(cell.z) * s * S;
       ctx.fillStyle = '#1f2227';
       ctx.beginPath();
       ctx.ellipse(q.x, q.y, 0.56 * sc, 0.46 * sc, 0, 0, Math.PI * 2);
@@ -255,9 +292,9 @@ export class Renderer2D {
     // Side cliffs.
     for (const side of [-1, 1]) {
       for (let i = 0; i < 16; i++) {
-        const x = side * (9.4 + i * 1.45);
+        const x = side * (HW + 1.4 + i * 1.45 * S);
         const top = i < 4 ? rng.range(8, 13) : rng.range(3, 12);
-        for (let y = -1.3; y < top; y += 1.14) block(x, y, 1.05, rng.pick(T.block), caps && y + 1.2 >= top);
+        for (let y = -1.3; y < top; y += 1.14 * S) block(x, y, 1.05, rng.pick(T.block), caps && y + 1.2 >= top);
         this._tree(ctx, P(x, top + 0.2), s, T);
       }
     }
@@ -268,25 +305,28 @@ export class Renderer2D {
     ctx.fillStyle = T.ground;
     ctx.fillRect(0, g0.y - 0.12 * s, L.width, 0.35 * s);
     for (let row = 0; row < 4; row++) {
-      for (let x = -30 + (row % 2) * 0.7; x <= 30; x += 1.5) block(x, -2.5 - row * 1.12, 1.12, rng.pick(T.block), caps && row === 0);
+      for (let x = -30 + (row % 2) * 0.7; x <= 30; x += 1.5 * S) block(x, -2.5 - row * 1.12, 1.12, rng.pick(T.block), caps && row === 0);
     }
     // Rail.
-    const r0 = P(-9.6, -1.78);
-    const r1 = P(9.6, -1.78);
-    for (let i = 0; i < 29; i++) {
-      const q = P(-9.8 + i * 0.7, -1.9);
+    const railHalf = HW + 1.8;
+    const r0 = P(-(HW + 1.6), -1.78);
+    const r1 = P(HW + 1.6, -1.78);
+    const sleeperGaps = Math.round((railHalf * 2) / 0.7);
+    for (let i = 0; i <= sleeperGaps; i++) {
+      const q = P(-railHalf + (i * railHalf * 2) / sleeperGaps, -1.9);
       ctx.fillStyle = '#4d3d31';
       ctx.fillRect(q.x - 0.1 * s, q.y - 0.05 * s, 0.2 * s, 0.12 * s);
     }
     ctx.fillStyle = T.rail;
     ctx.fillRect(r0.x, r0.y - 0.06 * s, r1.x - r0.x, 0.1 * s);
-    for (let i = 0; i < 11; i++) {
-      const q = P(-9 + i * 1.8, -1.86);
+    const bracketGaps = Math.round(((HW + 1) * 2) / 1.8);
+    for (let i = 0; i <= bracketGaps; i++) {
+      const q = P(-(HW + 1) + (i * (HW + 1) * 2) / bracketGaps, -1.86);
       ctx.fillStyle = '#e7732b';
       ctx.fillRect(q.x - 0.16 * s, q.y - 0.1 * s, 0.32 * s, 0.24 * s);
     }
     for (const side of [-1, 1]) {
-      const q = P(side * 9.75, -1.55);
+      const q = P(side * (HW + 1.75), -1.55);
       ctx.fillStyle = '#e7732b';
       ctx.fillRect(q.x - 0.15 * s, q.y - 0.28 * s, 0.3 * s, 0.55 * s);
     }
@@ -359,14 +399,50 @@ export class Renderer2D {
         this.particles.length = 0;
         this.popups.length = 0;
         this.caught.clear();
+        this.pushed.clear();
+        this.revealed.clear();
+        this.streaks.length = 0;
         this.cloneFade = 0;
         this.minerFall = null;
+        this.bolts.length = 0;
+        this.flashLevel = 0;
+        this.stormFrozen = false;
+        this.stormKind = e.terrain === 'volcano' ? 'lava' : 'ice';
+      } else if (e.type === 'stormWarn') {
+        const lava = this.stormKind === 'lava';
+        this.popups.push({ text: lava ? 'ERUPTION!' : '⚡ STORM', color: lava ? '#ffb040' : '#bfeaff', x: e.x, y: 3.4, life: 1 });
+        if (lava && !this.reducedMotion) this.shake = Math.max(this.shake, 0.25);
+      } else if (e.type === 'stormStrike') {
+        this._strike(e.x, true);
+        if (!this.reducedMotion) this.shake = Math.max(this.shake, this.stormKind === 'lava' ? 0.35 : 0.2);
+      } else if (e.type === 'stormHit' && e.damage) {
+        this._strike(e.x);
+        if (this.stormKind === 'lava') {
+          this._flameBlast(e.x, false);
+          this.popups.push({ text: 'BURNED −1 ♥', color: '#ff7a2a', x: e.x, y: 1.3, life: 1 });
+        } else {
+          this._burst(e.x, 0.3, ['#ffffff', '#bfeaff', '#8fd8ff'], 24, 5);
+          this.popups.push({ text: 'FROZEN −1 ♥', color: '#bfeaff', x: e.x, y: 1.3, life: 1 });
+        }
+        this.hit = 0.6;
+        if (!this.reducedMotion) this.shake = 0.35;
+      } else if (e.type === 'stormHit') {
+        this._strike(e.x, true);
+        this._burst(e.x, 0.3, ['#ffffff', '#bfeaff', '#8fd8ff'], 34, 6);
+        this.popups.push({ text: 'FROZEN!', color: '#bfeaff', x: e.x, y: 1.3, life: 1 });
+        this.stormFrozen = true;
+        this.minerFall = { t: 0, dir: Math.random() < 0.5 ? -1 : 1 };
+        this.hit = 0.9;
+        if (!this.reducedMotion) this.shake = 0.6;
       } else if (e.type === 'effectEnd' && e.effect === 'clone') {
         this._clonePuff();
+      } else if (e.type === 'split') {
+        const a = appearanceOf('split');
+        this._burst(e.x, e.y, [a.base, ...a.particle], 12, 2);
       } else if (e.type === 'catch') {
         const a = appearanceOf(e.itemType);
         this.impact = 1;
-        if (e.itemType === 'demon') {
+        if (e.itemType === 'demon' && e.fatal) {
           // The demon detonates ON the cart: a big flaming blast throws the miner out of
           // the tub onto the ground, then the GAME OVER card follows.
           this._burst(e.cartX, 0.3, a.particle, 30, 7);
@@ -375,7 +451,7 @@ export class Renderer2D {
           this.popups.push({ text: 'GAME OVER', color: '#ff3d5c', x: e.cartX, y: 1.2, life: 1 });
           this.hit = 0.9;
           if (!this.reducedMotion) this.shake = 0.6;
-        } else if (e.itemType === 'fire') {
+        } else if (e.itemType === 'fire' || e.itemType === 'demon') {
           // A regular blast: flames on the cart and a hard rattle, but the run continues.
           if (!e.blocked) this._flameBlast(e.cartX, false);
           else this._burst(e.cartX, 0.3, ['#ffc04a', '#ffffff'], 12, 3);
@@ -391,11 +467,18 @@ export class Renderer2D {
           // Caught on first touch (rim edge or tub side): settle in from that spot.
           const fromOffset = e.x - cartX;
           // Keep the geometry variant the rock fell as, so its shape never pops when caught.
-          const variant = ((this.schedule?.drops.find((d) => d.id === e.id)?.cellId ?? 0) * 5 + 1) % 6;
-          this.caught.set(e.id, { type: e.itemType, variant, t: 0, scoop, offset: Math.max(-0.7, Math.min(0.7, fromOffset)), fromOffset, fromY: e.y ?? 0.1, fx: false });
-          this.popups.push({ text: e.score ? `+${e.score}` : a.popup, color: a.popupColor, x: e.x, y: 0.95, life: 1 });
+          const drop = this.schedule?.drops.find((d) => d.id === e.id);
+          const variant = ((drop?.cellId ?? 0) * 5 + 1) % 6;
+          const size = drop?.half ? HALF_SCALE : 1;
+          this.caught.set(e.id, { type: e.itemType, variant, size, t: 0, scoop, offset: Math.max(-0.7, Math.min(0.7, fromOffset)), fromOffset, fromY: e.y ?? 0.1, fx: false });
+          // A mystery rock announces what it turned out to be.
+          if (e.reveal) {
+            const jackpot = e.reveal === 'jackpot';
+            this.popups.push({ text: jackpot ? `JACKPOT +${e.score}` : revealPopup(e.reveal), color: jackpot ? '#ffd35a' : appearanceOf(e.reveal).popupColor, x: e.x, y: 0.95, life: 1 });
+          } else this.popups.push({ text: e.score ? `+${e.score}` : a.popup, color: a.popupColor, x: e.x, y: 0.95, life: 1 });
+          if (e.pulled) this._burst(e.x, e.y ?? 0.4, ['#8fe4ff', '#ffffff'], 8, 1.4);
           if (e.effect === 'clone' && !e.refreshed) this._clonePuff();
-          if (e.itemType === 'cash' || e.itemType === 'shield' || e.effect === 'multiplier' || e.effect === 'clone') this.cheer = 0.75;
+          if (e.itemType === 'cash' || e.itemType === 'shield' || e.effect === 'multiplier' || e.effect === 'clone' || e.effect === 'magnet' || e.reveal === 'jackpot') this.cheer = 0.75;
         }
       } else if (e.type === 'ground') {
         const a = appearanceOf(e.itemType);
@@ -510,7 +593,13 @@ export class Renderer2D {
       }
     }
 
+    const sch = st?.schedule;
+    const fw = sch?.fogWindow;
+    const fogLevel = sch?.modifier === 'fog' ? 1 : fw ? Math.max(0, Math.min(1, (T - fw[0]) / 0.6, (fw[1] - T) / 0.6)) : 0;
+    const fog = fogLevel > 0.5;
+    this.stageWind = sch?.modifier === 'windy' || (sch?.windWindow && T >= sch.windWindow[0] && T < sch.windWindow[1]) ? sch.wind : 0;
     this._drawLife(ctx, dt, view.time);
+    this._drawWater(ctx, view.time);
 
     // Shelf cells.
     for (const cell of CELLS) {
@@ -522,11 +611,12 @@ export class Renderer2D {
       if (drop && T < drop.detachAt) {
         const p = (T - drop.crackAt) / (drop.detachAt - drop.crackAt);
         const amp = (this.reducedMotion ? 0.01 : 0.04) * p;
-        // Shelf rocks sit at the same card scale the falling boxes use.
-        this._drawRock(drop.type, variant, cell.x + Math.sin(view.time * 70) * amp, cell.y, FALL_SCALE * sc, 0, true);
-        // Announce what is coming while the rock is still shaking loose.
+        // Shelf rocks sit at the same card scale the falling boxes use; fog hides the marking.
+        this._drawRock(fog ? 'plain' : drop.type, variant, cell.x + Math.sin(view.time * 70) * amp, cell.y, FALL_SCALE * sc, 0, true);
+        // Announce what is coming while the rock is still shaking loose, with an arrow when a
+        // vent or the wind will push it.
         const tag = appearanceOf(drop.type).tag;
-        if (tag && p > 0.2) this._drawLabel(tag.text, cell.x, cell.y + 0.75, 0.44, tag);
+        if (tag && p > 0.2 && !fog) this._drawLabel(tagText(tag, driftDir(drop, T)), cell.x, cell.y + 0.75, 0.44, tag);
         continue;
       }
       if (drop && T < drop.refillAt) continue;
@@ -538,32 +628,54 @@ export class Renderer2D {
     // Cart.
     const cart = sim.cart;
     const cartX = cart ? cart.prevX + (cart.x - cart.prevX) * alpha : 0;
-    const width = cart ? cart.prevWidth + (cart.width - cart.prevWidth) * alpha : 2.56;
+    const width = cart ? cart.prevWidth + (cart.width - cart.prevWidth) * alpha : BASE_SCOOP_WIDTH;
     this.cartX = cartX;
     this.cartWidth = width;
     const timers = sim.effectTimers();
+    const frozen = (!!st && sim.isFrozen()) || this.stormFrozen;
     this._drawClones(timers.cloneSeconds, cartX, width, cart?.v || 0, view.time, dt);
-    this._drawCart(ctx, cartX, width, cart?.v || 0, st && sim.isInvulnerable(), view.time, dt);
+    if (timers.magnetSeconds > 0) this._drawMagnet(cartX, width, timers.magnetSeconds);
+    this._drawCart(ctx, cartX, width, cart?.v || 0, st && sim.isInvulnerable(), view.time, dt, this.cartAnim, frozen);
     const cloneXs = clonePositions(cartX, width);
+    this._iceSpray(st, cart?.v || 0, cartX, dt);
 
     // Falling rocks, drawn after the cart so they pass in front of the miner.
     if (st) {
       for (const d of st.falling) {
         if (T < d.detachAt) continue;
+        if (d.half === 1 && T < d.driftStart) continue; // the second half appears at the split
         const tau = T - d.detachAt;
         const cell = CELLS[d.cellId];
+        const split = d.half && T >= d.driftStart;
         // Same card scale as on the shelf; only the depth cue eases out as it comes forward.
         const ds = depthScale(cell.z);
-        const sc = FALL_SCALE * (ds + (1 - ds) * easeOut(tau / 0.35));
+        const sc = FALL_SCALE * (ds + (1 - ds) * easeOut(tau / 0.35)) * (split ? HALF_SCALE : 1);
         const y = dropYAt(d, T);
+        const x = dropXAt(d, T);
+        const fogged = fog && y > MODIFIERS.fog.line;
+        if (fog && !fogged && !this.revealed.has(d.id)) {
+          this.revealed.add(d.id);
+          this._burst(x, y, ['#f2f5f8', '#dfe5ec'], 6, 1);
+        }
+        if (d.x0 !== undefined && !d.half && T >= d.driftStart && !this.pushed.has(d.id)) {
+          this.pushed.add(d.id);
+          if (st.terrain === 'volcano' && st.modifier !== 'windy') this._burst(x, y - 0.3, ['#ff9a3c', '#ffd27a', '#8a7f7a'], 8, 1.4);
+        }
         // The demon burns: a flickering glow behind it and flames licking upward.
-        if (d.type === 'demon') this._demonAura(d, y, view.time, dt);
-        this._drawRock(d.type, (d.cellId * 5 + 1) % 6, d.x, y, sc, Math.sin(T * 1.9 + d.id) * 0.12, true);
+        if (d.type === 'demon' && !fogged) this._demonAura({ id: d.id, x }, y, view.time, dt);
+        this._drawRock(fogged ? 'plain' : d.type, (d.cellId * 5 + 1) % 6, x, y, sc, Math.sin(T * 1.9 + d.id) * 0.12, true);
         // The rock is small while falling: the floating tag does the real explaining.
         const tag = appearanceOf(d.type).tag;
-        if (tag) this._drawLabel(tag.text, d.x, y + 0.75, 0.44, tag);
+        if (tag && !fogged && !split) this._drawLabel(tagText(tag, driftDir(d, T)), x, y + 0.75, 0.44, tag);
       }
     }
+    this._drawStorm(ctx, st?.schedule?.storms, T, dt, view.time);
+    if (fogLevel > 0.01) {
+      ctx.globalAlpha = fogLevel;
+      this._drawFog();
+      ctx.globalAlpha = 1;
+    }
+    if (this.stageWind) this._drawWind(dt);
 
     // Caught rocks settling in the scoop, then dissolving.
     for (const [id, c] of this.caught) {
@@ -578,7 +690,7 @@ export class Renderer2D {
         this._burst(scoopX + c.offset, 0.3, appearanceOf(c.type).particle, 16, 3);
       }
       const sink = easeOut(c.t / 0.12);
-      const k = FALL_SCALE * 0.86 * (1 - Math.max(0, (c.t - 0.24) / 0.18) * 0.85);
+      const k = FALL_SCALE * 0.86 * (1 - Math.max(0, (c.t - 0.24) / 0.18) * 0.85) * (c.size ?? 1);
       const offset = c.fromOffset + (c.offset - c.fromOffset) * sink;
       this._drawRock(c.type, c.variant ?? 1, scoopX + offset, c.fromY + (-0.2 - c.fromY) * sink, k, 0, true);
     }
@@ -618,7 +730,7 @@ export class Renderer2D {
 
   _drawRock(kind, variant, x, y, scale = 1, rot = 0, stretched = false) {
     const s = this.layout.pxPerUnit;
-    const px = Math.max(8, Math.round(1.36 * s * this.dpr));
+    const px = Math.max(8, Math.round(1.36 * S * s * this.dpr));
     const sprite = this._rockSprite(kind, variant, px, stretched);
     const q = this.layout.toScreen(x, y);
     const w = (sprite.width / this.dpr) * scale;
@@ -682,7 +794,325 @@ export class Renderer2D {
     });
   }
 
-  _drawCart(ctx, x, width, v, invulnerable, time, dt, anim = this.cartAnim) {
+  /** Magnet: a glowing ring around the scoop marking how far its pull reaches. */
+  _drawMagnet(cartX, width, seconds) {
+    const ctx = this.ctx;
+    const L = this.layout;
+    const s = L.pxPerUnit;
+    const reach = width / 2 + ROCK.radius * ROCK.catchOverlapFraction + EFFECTS.magnetReach;
+    const c = L.toScreen(cartX, 0.2);
+    const blink = seconds < 1 && !this.reducedMotion ? 0.5 + 0.5 * Math.cos(this.clock * 18) : 1;
+    ctx.save();
+    ctx.globalAlpha = (0.6 + (this.reducedMotion ? 0 : 0.15 * Math.sin(this.clock * 8))) * blink;
+    ctx.strokeStyle = '#8fe4ff';
+    ctx.lineWidth = Math.max(2, s * 0.07);
+    ctx.setLineDash([s * 0.3, s * 0.18]);
+    ctx.lineDashOffset = this.reducedMotion ? 0 : -this.clock * s * 1.2;
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y, reach * s, reach * s * 0.3, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Ice: snow sprays from the wheels while the cart glides and brakes. */
+  _iceSpray(st, v, cartX, dt) {
+    if (st?.terrain === 'ice' && dt > 0 && Math.abs(v) > 2.5 && Math.abs(v) < Math.abs(this.lastV) - 1e-3 && Math.random() < dt * 25) {
+      this._burst(cartX - Math.sign(v) * 0.9, -1.7, ['#ffffff', '#e4eef7'], this.reducedMotion ? 1 : 3, 1.2);
+    }
+    this.lastV = v;
+  }
+
+  /** Fog stages: a bank of mist over the upper arena; rocks above the fog line show no marking. */
+  _drawFog() {
+    const L = this.layout;
+    const ctx = this.ctx;
+    const bottom = L.toScreen(0, MODIFIERS.fog.line - 0.8).y;
+    const g = ctx.createLinearGradient(0, 0, 0, bottom);
+    g.addColorStop(0, 'rgba(236,240,245,0.86)');
+    g.addColorStop(0.72, 'rgba(236,240,245,0.62)');
+    g.addColorStop(1, 'rgba(236,240,245,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, L.width, bottom);
+  }
+
+  /** Windy stages: streaks of blown snow crossing the arena with the wind. */
+  _drawWind(dt) {
+    const L = this.layout;
+    const dir = this.stageWind;
+    if (dt > 0 && !this.reducedMotion && Math.random() < dt * 14) {
+      this.streaks.push({ x: dir > 0 ? L.view.left - 1 : L.view.right + 1, y: 1 + Math.random() * 9, v: dir * (9 + Math.random() * 4), len: 0.6 + Math.random() * 0.8 });
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = Math.max(1, L.pxPerUnit * 0.035);
+    ctx.lineCap = 'round';
+    for (const k of this.streaks) {
+      k.x += k.v * dt;
+      const a = L.toScreen(k.x, k.y);
+      const b = L.toScreen(k.x - Math.sign(k.v) * k.len, k.y);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+    this.streaks = this.streaks.filter((k) => k.x > L.view.left - 3 && k.x < L.view.right + 3);
+  }
+
+  _strike(x, big = false) {
+    if (this.stormKind === 'lava') this._erupt(x, big);
+    else this._bolt(x, big);
+  }
+
+  _erupt(x, big = false) {
+    const n = Math.round((big ? 26 : 12) * (this.quality === 'low' ? 0.5 : 1));
+    for (let i = 0; i < n; i++) {
+      this.particles.push({ x: x + (Math.random() - 0.5) * 0.8, y: -1.5, vx: (Math.random() - 0.5) * 3, vy: 5 + Math.random() * (big ? 5 : 3.5), life: 0.9 + Math.random() * 0.5, color: ['#ffe07a', '#ff9a2a', '#ff4a12'][i % 3], r: 0.1 + Math.random() * 0.12 });
+    }
+    this.flashLevel = Math.max(this.flashLevel, big ? 0.5 : 0.18);
+  }
+
+  _bolt(x, big = false) {
+    const pts = [];
+    let bx = x;
+    for (let y = 11.5; y > -1.85; y -= 0.5 + Math.random() * 0.6) {
+      pts.push([bx, y]);
+      bx = x + Math.max(-1, Math.min(1, bx - x + (Math.random() - 0.5) * 1.2));
+    }
+    pts.push([bx, -1.85]);
+    const from = pts[2 + Math.floor(Math.random() * Math.max(1, pts.length - 6))];
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    const branch = [from, ...[1, 2, 3].map((k) => [from[0] + dir * k * (0.4 + Math.random() * 0.3), from[1] - k * (0.5 + Math.random() * 0.4)])];
+    this.bolts.push({ pts, branch, life: big ? 0.55 : 0.28, max: big ? 0.55 : 0.28, big });
+    this.flashLevel = Math.max(this.flashLevel, big ? 0.6 : 0.22);
+  }
+
+  _drawStorm(ctx, storms, T, dt, time) {
+    const L = this.layout;
+    const s = L.pxPerUnit;
+    const calm = this.reducedMotion;
+    const z = storms?.find((q) => T >= q.warnAt && T <= q.endAt + 0.6);
+    if (z) {
+      const warn = T < z.strikeAt;
+      const fade = T > z.endAt ? Math.max(0, 1 - (T - z.endAt) / 0.6) : 1;
+      const p = warn ? (T - z.warnAt) / (z.strikeAt - z.warnAt) : 1;
+      const blink = calm ? 0.6 : 0.5 + 0.5 * Math.sin(time * (10 + 14 * p));
+      const a = L.toScreen(z.x - z.half, 11.5);
+      const b = L.toScreen(z.x + z.half, -1.85);
+      const w = b.x - a.x;
+      const h = b.y - a.y;
+      const lava = this.stormKind === 'lava';
+      const C = STORM_COLORS[lava ? 'lava' : 'ice'];
+      ctx.save();
+      const haze = ctx.createLinearGradient(0, a.y, 0, b.y);
+      const k = warn ? 0.1 + 0.16 * blink : 0.72 * fade;
+      haze.addColorStop(0, `rgba(${C.top},${k * 0.45})`);
+      haze.addColorStop(1, `rgba(${C.bottom},${k})`);
+      ctx.fillStyle = haze;
+      ctx.fillRect(a.x, a.y, w, h);
+      const edge = warn ? 0.35 + 0.6 * blink : 0.5 * fade;
+      for (const [lw, k] of [[Math.max(7, 0.26 * s), 0.3], [Math.max(2, 0.08 * s), 1]]) {
+        ctx.strokeStyle = `rgba(${C.edge},${edge * k})`;
+        ctx.lineWidth = lw;
+        for (const ex of [a.x, b.x]) {
+          ctx.beginPath();
+          ctx.moveTo(ex, a.y);
+          ctx.lineTo(ex, b.y);
+          ctx.stroke();
+        }
+      }
+      const cloud = warn ? 0.75 * p : 0.9 * fade;
+      ctx.fillStyle = `rgba(${C.cloud},${cloud})`;
+      for (let i = 0; i < 7; i++) {
+        const cx = a.x + w * (0.05 + i * 0.15);
+        const r = (0.7 + (i % 3) * 0.25) * s;
+        ctx.beginPath();
+        ctx.ellipse(cx, L.toScreen(0, 9.6 + (i % 2) * 0.3).y, r * 1.3, r * 0.7, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (lava && warn && dt > 0 && !calm && Math.random() < dt * 14) {
+        this.particles.push({ x: z.x + (Math.random() - 0.5) * z.half * 2, y: -1.6, vx: (Math.random() - 0.5) * 0.6, vy: 2 + 3 * p + Math.random(), life: 0.6, color: Math.random() < 0.5 ? '#ffd24a' : '#ff7a1c', r: 0.06 + Math.random() * 0.05 });
+      }
+      const rail = L.toScreen(z.x - z.half, -1.4);
+      const railH = 0.44 * s;
+      if (warn) {
+        ctx.beginPath();
+        ctx.rect(a.x, rail.y, w, railH);
+        ctx.clip();
+        ctx.fillStyle = `rgba(${C.stripeBg},${0.45 + 0.4 * blink})`;
+        ctx.fillRect(a.x, rail.y, w, railH);
+        ctx.fillStyle = `rgba(${C.stripe},${0.55 + 0.45 * blink})`;
+        const step = 0.5 * s;
+        const off = calm ? 0 : ((time * 1.5 * s) % step);
+        for (let sx = a.x - railH + off; sx < b.x + railH; sx += step) {
+          ctx.beginPath();
+          ctx.moveTo(sx, rail.y + railH);
+          ctx.lineTo(sx + step / 2, rail.y + railH);
+          ctx.lineTo(sx + step / 2 + railH, rail.y);
+          ctx.lineTo(sx + railH, rail.y);
+          ctx.closePath();
+          ctx.fill();
+        }
+      } else {
+        const frost = ctx.createLinearGradient(0, rail.y, 0, rail.y + railH);
+        frost.addColorStop(0, `rgba(${C.bandTop},0)`);
+        frost.addColorStop(0.4, `rgba(${C.bandTop},${0.9 * fade})`);
+        frost.addColorStop(1, `rgba(${C.bandBottom},${0.85 * fade})`);
+        ctx.fillStyle = frost;
+        ctx.fillRect(a.x, rail.y, w, railH);
+        ctx.strokeStyle = `rgba(${C.streak},${0.9 * fade})`;
+        ctx.lineWidth = Math.max(1.5, 0.05 * s);
+        ctx.lineCap = 'round';
+        for (const f of this.snow) {
+          const fx = a.x + ((f.x - (calm ? 0 : time * 0.12 * f.v)) % 1 + 1) % 1 * w;
+          const fy = a.y + ((((f.y + (calm ? 0 : (lava ? -0.6 : 0.5) * time * f.v)) % 1) + 1) % 1) * h;
+          ctx.beginPath();
+          ctx.moveTo(fx, fy);
+          ctx.lineTo(fx - f.l * 0.35 * s, fy + (lava ? -0.6 : 1) * f.l * s);
+          ctx.stroke();
+        }
+        if (T < z.endAt && dt > 0 && this.clock >= this.nextBolt) {
+          this._strike(z.x + (Math.random() - 0.5) * z.half * 1.4);
+          this.nextBolt = this.clock + (calm ? 1.2 : 0.35 + Math.random() * 0.6);
+        }
+      }
+      ctx.restore();
+    }
+    if (!this.bolts.length && this.flashLevel <= 0) return;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const line = (pts) => {
+      ctx.beginPath();
+      pts.forEach(([px, py], i) => {
+        const q = L.toScreen(px, py);
+        if (i) ctx.lineTo(q.x, q.y);
+        else ctx.moveTo(q.x, q.y);
+      });
+      ctx.stroke();
+    };
+    for (const bolt of this.bolts) {
+      bolt.life -= dt;
+      if (bolt.life <= 0) continue;
+      const flick = calm || Math.sin(time * 90) > -0.3 ? 1 : 0.35;
+      const alpha = (bolt.life / bolt.max) * flick;
+      ctx.strokeStyle = `rgba(127,208,255,${0.25 * alpha})`;
+      ctx.lineWidth = (bolt.big ? 0.8 : 0.56) * s;
+      line(bolt.pts);
+      line(bolt.branch);
+      ctx.strokeStyle = `rgba(127,208,255,${0.55 * alpha})`;
+      ctx.lineWidth = (bolt.big ? 0.4 : 0.28) * s;
+      line(bolt.pts);
+      line(bolt.branch);
+      ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+      ctx.lineWidth = (bolt.big ? 0.1 : 0.07) * s;
+      line(bolt.pts);
+      line(bolt.branch);
+    }
+    this.bolts = this.bolts.filter((bolt) => bolt.life > 0);
+    this.flashLevel = Math.max(0, this.flashLevel - dt * 2.5);
+    if (!calm && this.flashLevel > 0.01) {
+      ctx.fillStyle = `rgba(${this.stormKind === 'lava' ? '255,150,70' : '232,246,255'},${this.flashLevel * 0.45})`;
+      ctx.fillRect(0, 0, L.width, L.height);
+    }
+    ctx.restore();
+  }
+
+  _drawWater(ctx, time) {
+    const L = this.layout;
+    const s = L.pxPerUnit;
+    const icy = this.theme.capKind === 'snow';
+    const t = this.reducedMotion ? 0 : time;
+    for (const side of [-1, 1]) {
+      const a = L.toScreen(side < 0 ? -10.9 : 9.8, 6.2);
+      const b = L.toScreen(side < 0 ? -9.8 : 10.9, -1.55);
+      const fall = ctx.createLinearGradient(0, a.y, 0, b.y);
+      fall.addColorStop(0, icy ? 'rgba(170,220,248,0)' : 'rgba(230,70,15,0)');
+      fall.addColorStop(0.03, icy ? 'rgba(170,220,248,0.85)' : 'rgba(240,90,20,0.92)');
+      fall.addColorStop(1, icy ? 'rgba(205,238,255,0.92)' : 'rgba(255,190,60,0.95)');
+      if (!icy) {
+        ctx.fillStyle = 'rgba(255,90,20,0.22)';
+        ctx.fillRect(a.x - 0.25 * s, a.y + (b.y - a.y) * 0.12, b.x - a.x + 0.5 * s, (b.y - a.y) * 0.88);
+      }
+      ctx.fillStyle = fall;
+      ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      ctx.strokeStyle = icy ? 'rgba(255,255,255,0.7)' : 'rgba(255,236,150,0.85)';
+      ctx.lineWidth = Math.max(1, 0.05 * s);
+      const h = b.y - a.y;
+      for (let k = 0; k < 8; k++) {
+        const x = a.x + ((k + 0.5) / 8) * (b.x - a.x);
+        for (let j = 0; j < 3; j++) {
+          const y = a.y + h * 0.15 + (((t * (icy ? 0.35 : 0.12) + k * 0.37 + j / 3) % 1) * h * 0.85);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(x, Math.min(b.y, y + 0.6 * s));
+          ctx.stroke();
+        }
+      }
+      const src = L.toScreen(side * 10.35, 6.3);
+      ctx.fillStyle = icy ? 'rgba(26,30,36,0.92)' : 'rgba(70,24,8,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(src.x, src.y, 0.75 * s, 0.4 * s, 0, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = icy ? 'rgba(255,255,255,0.88)' : 'rgba(255,214,110,0.92)';
+      ctx.beginPath();
+      ctx.ellipse(src.x, src.y + 0.06 * s, 0.6 * s, 0.14 * s, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const p0 = L.toScreen(side < 0 ? -11.5 : 9.7, -1.25);
+      const p1 = L.toScreen(side < 0 ? -9.7 : 11.5, -1.72);
+      const pool = ctx.createLinearGradient(0, p0.y, 0, p1.y);
+      pool.addColorStop(0, icy ? 'rgba(191,232,255,0.2)' : 'rgba(255,176,58,0.2)');
+      pool.addColorStop(0.3, icy ? 'rgba(150,210,245,0.9)' : 'rgba(255,150,40,0.92)');
+      pool.addColorStop(1, icy ? 'rgba(63,143,200,0.95)' : 'rgba(154,32,8,0.95)');
+      ctx.fillStyle = pool;
+      ctx.fillRect(p0.x, p0.y, p1.x - p0.x, p1.y - p0.y);
+      ctx.fillStyle = icy ? 'rgba(255,255,255,0.7)' : 'rgba(255,230,120,0.85)';
+      for (let k = 0; k < 6; k++) {
+        const rx = p0.x + (((k * 0.29 + t * (icy ? 0.06 : 0.02)) % 1) * (p1.x - p0.x));
+        const ry = p0.y + (0.4 + (k % 3) * 0.2) * (p1.y - p0.y);
+        ctx.fillRect(rx, ry, 0.35 * s, Math.max(1, 0.03 * s));
+      }
+      const foam = L.toScreen(side * 10.35, -1.35);
+      ctx.fillStyle = icy ? `rgba(255,255,255,${0.75 + 0.2 * Math.sin(t * 5)})` : `rgba(255,214,110,${0.75 + 0.2 * Math.sin(t * 5)})`;
+      for (let k = -2; k <= 2; k++) {
+        ctx.beginPath();
+        ctx.ellipse(foam.x + k * 0.22 * s, foam.y + Math.abs(k) * 0.04 * s, (0.3 + 0.03 * Math.sin(t * 7 + k)) * s, 0.16 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  _drawCartSprite(ctx, x, width, v, invulnerable, time, dt, anim, frozen, squash) {
+    const { img, meta } = this.cartSprite;
+    const L = this.layout;
+    const s = L.pxPerUnit;
+    const h = 1.75 / (0.994 - meta.rim);
+    const xs = cartSliceXs(width, BASE_SCOOP_WIDTH, h * meta.aspect);
+    const lean = -Math.max(-1, Math.min(1, v / CART_MAX_SPEED)) * 0.16;
+    const fall = anim === this.cartAnim ? this.minerFall : null;
+    if (fall) fall.t += dt;
+    const tip = fall ? Math.min(fall.t / 0.5, 1) : 0;
+    const o = L.toScreen(x, -squash + (this.cheer > 0 ? 0.1 : 0) - tip * 0.25);
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(-lean * 0.3 + (fall ? fall.dir * tip * 0.45 : 0));
+    if (invulnerable) {
+      ctx.shadowColor = 'rgba(255,255,255,0.9)';
+      ctx.shadowBlur = 10 + (this.reducedMotion ? 0 : Math.sin(time * 9) * 4);
+    }
+    if (this.hit > 0 && anim === this.cartAnim) ctx.filter = 'sepia(0.6) saturate(3) hue-rotate(-30deg)';
+    else if (frozen) ctx.filter = 'saturate(0.35) brightness(1.25)';
+    const top = -meta.rim * h * s;
+    const iw = img.naturalWidth;
+    for (let i = 0; i < CART_SLICES.length - 1; i++) {
+      const dw = (xs[i + 1] - xs[i]) * s;
+      if (dw > 0.5) ctx.drawImage(img, CART_SLICES[i] * iw, 0, (CART_SLICES[i + 1] - CART_SLICES[i]) * iw, img.naturalHeight, xs[i] * s, top, dw + 0.5, h * s);
+    }
+    ctx.restore();
+  }
+
+  _drawCart(ctx, x, width, v, invulnerable, time, dt, anim = this.cartAnim, frozen = false) {
     const L = this.layout;
     const s = L.pxPerUnit;
     const P = (px, py) => L.toScreen(x + px, py);
@@ -708,6 +1138,12 @@ export class Renderer2D {
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
     };
+    if (this.cartSprite) {
+      this._drawCartSprite(ctx, x, width, v, invulnerable, time, dt, anim, frozen, squash);
+      return;
+    }
+    const tier = CART_TIERS[this.cartTier] && !CART_TIERS[this.cartTier].sprite ? CART_TIERS[this.cartTier] : CART_TIERS[0];
+
     if (invulnerable) {
       ctx.save();
       ctx.shadowColor = 'rgba(255,255,255,0.9)';
@@ -783,17 +1219,18 @@ export class Renderer2D {
       ctx.lineTo(top.x - bw, top.y + depth);
       ctx.closePath();
     };
+    const painted = tier !== CART_TIERS[0];
     const steel = ctx.createLinearGradient(0, top.y, 0, top.y + depth);
-    steel.addColorStop(0, '#9aa2aa');
-    steel.addColorStop(0.6, '#7f878f');
-    steel.addColorStop(1, '#5e656c');
+    steel.addColorStop(0, painted ? shade(tier.tub, -0.05) : '#9aa2aa');
+    steel.addColorStop(0.6, painted ? shade(tier.tub, -0.2) : '#7f878f');
+    steel.addColorStop(1, painted ? shade(tier.tub, -0.38) : '#5e656c');
     tub();
     ctx.fillStyle = steel;
     ctx.fill();
     ctx.save();
     tub();
     ctx.clip();
-    for (const [fx, fy, r] of [[-0.6, 0.7, 0.28], [0.45, 0.8, 0.22], [0.05, 0.45, 0.16], [0.85, 0.55, 0.18]]) {
+    for (const [fx, fy, r] of painted ? [] : [[-0.6, 0.7, 0.28], [0.45, 0.8, 0.22], [0.05, 0.45, 0.16], [0.85, 0.55, 0.18]]) {
       const cx = top.x + fx * hw;
       const cy = top.y + fy * depth;
       const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * s);
@@ -813,15 +1250,35 @@ export class Renderer2D {
     ctx.fillStyle = '#4d535a';
     ctx.fillRect(top.x - hw, top.y + depth * 0.52, hw * 2, 0.1 * s);
     ctx.fillRect(top.x - hw, top.y + depth - 0.08 * s, hw * 2, 0.08 * s);
+    if (tier.stripe) {
+      ctx.fillStyle = tier.accent;
+      ctx.fillRect(top.x - hw, top.y + 0.34 * s, hw * 2, 0.16 * s);
+    }
     ctx.restore();
     // Heavy rolled lip with a row of rivets.
-    ctx.fillStyle = '#5a6168';
+    ctx.fillStyle = tier.lip;
     ctx.fillRect(top.x - hw - 0.04 * s, top.y - 0.06 * s, (hw + 0.04 * s) * 2, 0.14 * s);
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.fillRect(top.x - hw - 0.04 * s, top.y - 0.06 * s, (hw + 0.04 * s) * 2, 0.025 * s);
     for (let rx = -hw + 0.12 * s; rx < hw - 0.05 * s; rx += 0.26 * s) {
       disc(top.x + rx, top.y + 0.01 * s, 0.035 * s, '#c9ced3');
       disc(top.x + rx, top.y + depth * 0.52 + 0.05 * s, 0.032 * s, '#b9bec3');
+    }
+    if (frozen) {
+      // Frozen wheels: frost glazes the tub and icicles hang from the lip.
+      tub();
+      ctx.fillStyle = 'rgba(200,236,255,0.42)';
+      ctx.fill();
+      ctx.fillStyle = 'rgba(235,248,255,0.92)';
+      let n = 0;
+      for (let ix = -hw + 0.18 * s; ix < hw - 0.1 * s; ix += 0.34 * s, n++) {
+        ctx.beginPath();
+        ctx.moveTo(top.x + ix - 0.06 * s, top.y + 0.07 * s);
+        ctx.lineTo(top.x + ix + 0.06 * s, top.y + 0.07 * s);
+        ctx.lineTo(top.x + ix, top.y + (0.2 + (n % 3) * 0.05) * s);
+        ctx.closePath();
+        ctx.fill();
+      }
     }
 
     // Hands grip the front lip; a cheer throws both fists up.
@@ -842,7 +1299,7 @@ export class Renderer2D {
     if (invulnerable) ctx.restore();
 
     // Undercarriage and iron rail wheels whose spokes follow displacement.
-    rect(0, -1.27, 2.0, 0.14, '#26292e');
+    rect(0, -1.27, 2.0, 0.14, tier.frame);
     for (const wx of [-0.72, 0.72]) rect(wx, -1.4, 0.26, 0.18, '#9c5424');
     for (const wx of [-0.72, 0.72]) {
       const c = P(wx, -1.41);
@@ -857,7 +1314,7 @@ export class Renderer2D {
         ctx.lineTo(c.x + Math.cos(a) * 0.3 * s, c.y + Math.sin(a) * 0.3 * s);
         ctx.stroke();
       }
-      disc(c.x, c.y, 0.09 * s, '#a0582a');
+      disc(c.x, c.y, 0.09 * s, tier.hub);
     }
   }
 
@@ -903,8 +1360,9 @@ export class Renderer2D {
         if (kind === 'embers') m.y -= m.v * dt * 0.6;
         else if (kind === 'dust') m.x += m.v * dt * 0.6;
         else m.y += m.v * dt;
-        m.x += Math.sin(m.p * 0.8) * 0.004 * dt * 10;
+        m.x += Math.sin(m.p * 0.8) * 0.004 * dt * 10 + this.stageWind * m.v * dt * 1.5;
       }
+      if (m.x < 0) m.x += 1;
       if (m.y > 1) m.y -= 1;
       if (m.y < 0) m.y += 1;
       if (m.x > 1) m.x -= 1;
@@ -941,7 +1399,7 @@ export class Renderer2D {
     if (S.slideTimer <= 0 && !this.reducedMotion) {
       S.slideTimer = LIFE.slideEvery[0] + Math.random() * (LIFE.slideEvery[1] - LIFE.slideEvery[0]);
       const side = Math.random() < 0.5 ? -1 : 1;
-      this._burst(side * (9.6 + Math.random() * 3), 5 + Math.random() * 3, [T.cap, '#ffffff'], 14, 0.8);
+      this._burst(side * (HW + 1.6 + Math.random() * 3), 5 + Math.random() * 3, [T.cap, '#ffffff'], 14, 0.8);
     }
   }
 
@@ -952,24 +1410,6 @@ export class Renderer2D {
     const sprite = this._rockSprite(type, 1, Math.round(size * 0.78));
     c.getContext('2d').drawImage(sprite, (size - sprite.width) / 2, (size - sprite.height) / 2);
     return c.toDataURL('image/png');
-  }
-
-  themeThumbnailDataURL(themeId, width = 320, height = 200) {
-    const saved = { layout: this.layout, theme: this.themeId, canvas: this.canvas, ctx: this.ctx, dpr: this.dpr, bg: this.bg };
-    const c = makeCanvas(width, height);
-    this.canvas = c;
-    this.ctx = c.getContext('2d');
-    this.dpr = 1;
-    this.setTheme(themeId);
-    this.layout = computeLayout(width, height, {});
-    this._buildBackground();
-    this.ctx.drawImage(this.bg, 0, 0);
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-    for (const cell of CELLS) this._drawRock('plain', (cell.id * 5 + 1) % 6, cell.x, cell.y, depthScale(cell.z));
-    const url = c.toDataURL('image/png');
-    Object.assign(this, { layout: saved.layout, canvas: saved.canvas, ctx: saved.ctx, dpr: saved.dpr });
-    this.setTheme(saved.theme);
-    return url;
   }
 
   prewarmThemes() {}

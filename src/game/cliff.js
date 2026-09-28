@@ -50,6 +50,18 @@ export function dropYAt(drop, t) {
   return drop.y0 - speed * (tau - accel / 2);
 }
 
+/**
+ * Sideways position of a drop at stage time t. Rocks pushed by wind or heat vents (and the
+ * halves of a split rock) ease from their source column `x0` to their landing `x` between
+ * `driftStart` and `driftEnd`; catching only ever happens at the landing `x`.
+ */
+export function dropXAt(drop, t) {
+  if (drop.x0 === undefined || t >= drop.driftEnd) return drop.x;
+  if (t <= drop.driftStart) return drop.x0;
+  const p = (t - drop.driftStart) / (drop.driftEnd - drop.driftStart);
+  return drop.x0 + (drop.x - drop.x0) * p * p * (3 - 2 * p);
+}
+
 /** Time at which a drop falls to height y (y below the source). */
 export function dropTimeAtY(drop, y) {
   const dist = drop.y0 - y;

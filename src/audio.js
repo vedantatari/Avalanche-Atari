@@ -3,6 +3,8 @@
 
 const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);
 
+const MUSIC = { url: 'assets/audio/gem-rush-loop.mp3', start: 0.223, length: 15, fade: 0.12, beat: 60 / 128, gain: 0.35 };
+
 export class AudioEngine {
   constructor({ sound = true, music = true, masterVol = 1, sfxVol = 1, musicVol = 1 } = {}) {
     this.ctx = null;
@@ -45,6 +47,7 @@ export class AudioEngine {
         this.bed.gain.value = this._bedGain();
         this.bed.connect(this.master);
         this.noise = this._noiseBuffer();
+        this._loadMusic();
         this._startAmbience();
       }
       if (this.ctx.state === 'suspended' && !this.suspended) this.ctx.resume().catch(() => {});
@@ -99,8 +102,8 @@ export class AudioEngine {
     return buf;
   }
 
-  _tone({ freq, to, type = 'sine', start = 0, dur = 0.12, gain = 0.3, attack = 0.005 }) {
-    const t = this.ctx.currentTime + start;
+  _tone({ freq, to, type = 'sine', start = 0, dur = 0.12, gain = 0.3, attack = 0.005, at, out = this.sfx }) {
+    const t = at ?? this.ctx.currentTime + start;
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = type;
@@ -109,13 +112,13 @@ export class AudioEngine {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(gain, t + attack);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g).connect(this.sfx);
+    osc.connect(g).connect(out);
     osc.start(t);
     osc.stop(t + dur + 0.02);
   }
 
-  _noise({ start = 0, dur = 0.2, gain = 0.3, freq = 800, q = 0.8, type = 'lowpass' }) {
-    const t = this.ctx.currentTime + start;
+  _noise({ start = 0, dur = 0.2, gain = 0.3, freq = 800, q = 0.8, type = 'lowpass', at, out = this.sfx }) {
+    const t = at ?? this.ctx.currentTime + start;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noise;
     const f = this.ctx.createBiquadFilter();
@@ -125,16 +128,16 @@ export class AudioEngine {
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(gain, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f).connect(g).connect(this.sfx);
+    src.connect(f).connect(g).connect(out);
     src.start(t, Math.random());
     src.stop(t + dur + 0.02);
   }
 
   /** Plays a named cue. Frequent cues are rate-limited so pileups never get noisy. */
-  play(name) {
+  play(name, step = 0) {
     if (!this.ctx || !this.soundOn || this.suspended) return;
     const now = this.ctx.currentTime;
-    const minGap = { crack: 0.09, ground: 0.07, coin: 0.03 }[name] || 0;
+    const minGap = { crack: 0.09, ground: 0.07, coin: 0.03, tick: 0.055 }[name] || 0;
     if (minGap && now - (this.lastPlayed[name] || 0) < minGap) return;
     this.lastPlayed[name] = now;
     try {
@@ -171,6 +174,30 @@ export class AudioEngine {
           this._tone({ freq: 440, to: 880, dur: 0.3, gain: 0.12, type: 'triangle' });
           this._tone({ freq: 660, to: 1320, start: 0.08, dur: 0.3, gain: 0.1, type: 'triangle' });
           break;
+        case 'magnet':
+          // Electric hum rising into a clamp.
+          this._tone({ freq: 110, to: 220, dur: 0.35, gain: 0.16, type: 'sawtooth' });
+          this._tone({ freq: 880, start: 0.3, dur: 0.1, gain: 0.12, type: 'square' });
+          break;
+        case 'frost':
+          // Crystalline chime falling away as the wheels ice up.
+          [96, 91, 87].forEach((n, i) => this._tone({ freq: NOTE(n), start: i * 0.06, dur: 0.3, gain: 0.12, type: 'sine' }));
+          this._noise({ dur: 0.3, gain: 0.08, freq: 5200, type: 'highpass' });
+          break;
+        case 'split':
+          this._noise({ dur: 0.08, gain: 0.12, freq: 1800, type: 'highpass' });
+          this._tone({ freq: NOTE(79), start: 0.02, dur: 0.1, gain: 0.1, type: 'triangle' });
+          break;
+        case 'mystery':
+          [72, 79, 76, 84].forEach((n, i) => this._tone({ freq: NOTE(n), start: i * 0.05, dur: 0.12, gain: 0.15, type: 'triangle' }));
+          break;
+        case 'jackpot':
+          [84, 88, 91, 96, 100].forEach((n, i) => this._tone({ freq: NOTE(n), start: i * 0.05, dur: 0.18, gain: 0.18, type: 'square' }));
+          break;
+        case 'trophy':
+          [79, 84, 88, 91].forEach((n, i) => this._tone({ freq: NOTE(n), start: i * 0.09, dur: 0.4, gain: 0.16, type: 'triangle' }));
+          this._tone({ freq: NOTE(96), start: 0.36, dur: 0.6, gain: 0.12, type: 'sine', attack: 0.02 });
+          break;
         case 'damage':
           this._noise({ dur: 0.35, gain: 0.5, freq: 600 });
           this._tone({ freq: 140, to: 50, dur: 0.35, gain: 0.45, type: 'sine' });
@@ -190,6 +217,25 @@ export class AudioEngine {
         case 'lose':
           [67, 64, 60, 55].forEach((n, i) => this._tone({ freq: NOTE(n), start: i * 0.16, dur: 0.4, gain: 0.18, type: 'triangle' }));
           break;
+        case 'stormWarn':
+          [0, 0.22, 0.44].forEach((d) => this._tone({ freq: 880, to: 1320, start: d, dur: 0.14, gain: 0.12, type: 'square' }));
+          this._noise({ dur: 1.4, gain: 0.08, freq: 900, q: 0.6, type: 'bandpass' });
+          break;
+        case 'eruptWarn':
+          this._noise({ dur: 1.8, gain: 0.3, freq: 120 });
+          this._tone({ freq: 55, to: 80, dur: 1.8, gain: 0.25, attack: 0.3 });
+          [0.3, 0.7, 1.1, 1.4].forEach((d) => this._tone({ freq: 180, to: 320, start: d, dur: 0.08, gain: 0.08, type: 'triangle' }));
+          break;
+        case 'eruption':
+          this._tone({ freq: 90, to: 30, dur: 0.9, gain: 0.5 });
+          this._noise({ dur: 1.2, gain: 0.5, freq: 400 });
+          this._noise({ start: 0.05, dur: 1.4, gain: 0.2, freq: 2400, type: 'highpass' });
+          break;
+        case 'thunder':
+          this._noise({ dur: 0.12, gain: 0.5, freq: 3000, type: 'highpass' });
+          this._noise({ start: 0.03, dur: 1.6, gain: 0.55, freq: 180 });
+          this._tone({ freq: 70, to: 35, start: 0.02, dur: 1.2, gain: 0.35 });
+          break;
         case 'crack':
           this._noise({ dur: 0.06, gain: 0.08, freq: 2400, type: 'highpass' });
           break;
@@ -199,12 +245,114 @@ export class AudioEngine {
         case 'click':
           this._tone({ freq: 900, dur: 0.04, gain: 0.08, type: 'triangle' });
           break;
+        case 'tick':
+          this._tone({ freq: 900 + step * 900, dur: 0.03, gain: 0.05, type: 'square' });
+          break;
+        case 'star':
+          this._tone({ freq: NOTE(84 + step * 4), dur: 0.3, gain: 0.2, type: 'triangle' });
+          this._tone({ freq: NOTE(91 + step * 4), start: 0.06, dur: 0.4, gain: 0.14, type: 'sine', attack: 0.01 });
+          break;
         default:
           break;
       }
     } catch {
       // Audio failures never affect gameplay.
     }
+  }
+
+  updateMusic(state, timeLeft) {
+    if (!this.ctx) return;
+    if (!this.musicOn) state = 'stop';
+    if (state !== 'play') {
+      if (state === 'stop') this._stopSong();
+      return;
+    }
+    if (!this.loopBuffer) return;
+    const now = this.ctx.currentTime;
+    const m = this.song || (this.song = this._newSong(now));
+    const hot = timeLeft <= 10;
+    if (hot !== m.hot) {
+      m.hot = hot;
+      this._setRate(m, hot ? 1.08 : 1, now);
+      if (hot) this._noise({ at: now, out: m.out, dur: 1.4, gain: 0.2, freq: 5000, type: 'highpass' });
+    }
+    if (!hot) return;
+    const step = MUSIC.beat / (timeLeft <= 5 ? 2 : 1);
+    if (m.next < now) {
+      const pos = m.anchorPos + (now - m.anchorTime) * m.rate;
+      m.next = now + (Math.ceil(pos / step - 1e-6) * step - pos) / m.rate;
+    }
+    while (m.next < now + 0.12) {
+      this._tone({ freq: m.tick++ % 2 ? 1175 : 1568, at: m.next, out: m.out, dur: 0.05, gain: 0.08, type: 'square' });
+      m.next += step / m.rate;
+    }
+  }
+
+  _loadMusic() {
+    if (this.musicLoading) return;
+    this.musicLoading = fetch(new URL(MUSIC.url, document.baseURI).href)
+      .then((r) => r.arrayBuffer())
+      .then((data) => this.ctx.decodeAudioData(data))
+      .then((buf) => {
+        this.loopBuffer = this._loopBuffer(buf);
+      })
+      .catch(() => {
+        this.loopBuffer = null;
+      });
+  }
+
+  _loopBuffer(src) {
+    const sr = src.sampleRate;
+    const a = Math.round(MUSIC.start * sr);
+    const n = Math.min(Math.round(MUSIC.length * sr), src.length - a);
+    const x = Math.min(Math.round(MUSIC.fade * sr), src.length - a - n);
+    const out = this.ctx.createBuffer(src.numberOfChannels, n, sr);
+    for (let c = 0; c < src.numberOfChannels; c++) {
+      const from = src.getChannelData(c);
+      const to = out.getChannelData(c);
+      to.set(from.subarray(a, a + n));
+      for (let i = 0; i < x; i++) {
+        const k = (i / x) * (Math.PI / 2);
+        to[i] = from[a + i] * Math.sin(k) + from[a + n + i] * Math.cos(k);
+      }
+    }
+    return out;
+  }
+
+  _newSong(now) {
+    const out = this.ctx.createGain();
+    out.gain.value = 0.0001;
+    out.gain.setTargetAtTime(MUSIC.gain, now, 0.3);
+    out.connect(this.bed);
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.loopBuffer;
+    src.loop = true;
+    src.connect(out);
+    src.start(now);
+    return { out, src, hot: false, rate: 1, anchorTime: now, anchorPos: 0, next: 0, tick: 0 };
+  }
+
+  _setRate(m, rate, now) {
+    m.anchorPos += (now - m.anchorTime) * m.rate;
+    m.anchorTime = now;
+    m.rate = rate;
+    m.next = 0;
+    m.src.playbackRate.setValueAtTime(rate, now);
+  }
+
+  _stopSong() {
+    const m = this.song;
+    if (!m) return;
+    this.song = null;
+    const t = this.ctx.currentTime;
+    m.out.gain.cancelScheduledValues(t);
+    m.out.gain.setTargetAtTime(0.0001, t, 0.2);
+    try {
+      m.src.stop(t + 1.2);
+    } catch {
+      m.src.disconnect();
+    }
+    setTimeout(() => m.out.disconnect(), 1500);
   }
 
   _startAmbience() {
@@ -238,21 +386,6 @@ export class AudioEngine {
     src.start();
     lfo.start();
     nodes.push(src, lfo);
-    // Soft pad: two slow detuned tones per chord.
-    const chords = { ice: [57, 64], volcano: [45, 52] }[this.theme] || [57, 64];
-    for (const n of chords) {
-      for (const detune of [-5, 5]) {
-        const o = ctx.createOscillator();
-        o.type = 'triangle';
-        o.frequency.value = NOTE(n);
-        o.detune.value = detune;
-        const g = ctx.createGain();
-        g.gain.value = 0.012;
-        o.connect(g).connect(gain);
-        o.start();
-        nodes.push(o);
-      }
-    }
     gain.gain.setTargetAtTime(1, ctx.currentTime, 1.2);
     this.ambience = { gain, nodes };
   }

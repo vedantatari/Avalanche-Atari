@@ -324,7 +324,7 @@ describe('size effects', () => {
   });
 
   it('keeps the whole scoop inside the arena while expanding at an edge, without jitter', () => {
-    const sim = simWithDrops([makeDrop(0, 'expand', 6.7, 2)]);
+    const sim = simWithDrops([makeDrop(0, 'expand', ARENA.halfWidth - BASE_SCOOP_WIDTH / 2, 2)]);
     const right = { dir: 1, dragActive: false, dragDelta: 0 };
     runUntil(sim, 1.5, right); // parked against the right edge
     let lastX = sim.cart.x;
