@@ -134,7 +134,7 @@ export class Renderer2D {
   resize(layout) {
     this.layout = layout;
     const cap = this.quality === 'low' ? 1 : this.quality === 'medium' ? 1.5 : 2;
-    this.dpr = Math.min(window.devicePixelRatio || 1, cap);
+    this.dpr = Math.min(window.devicePixelRatio || 1, cap) * (layout.scale || 1);
     this.canvas.width = Math.max(1, Math.round(layout.width * this.dpr));
     this.canvas.height = Math.max(1, Math.round(layout.height * this.dpr));
     this.sprites.clear();

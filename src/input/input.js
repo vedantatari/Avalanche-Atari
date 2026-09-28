@@ -10,7 +10,7 @@ export class InputController {
    * @param {object} o
    * @param {HTMLElement} o.playfield drag/steer surface over the scene
    * @param {() => number} o.pxPerUnit CSS pixels per world unit on the gameplay plane
-   * @param {(clientX:number) => number} [o.worldX] client X → world X on the gameplay plane
+   * @param {(x:number) => number} [o.worldX] playfield X → world X on the gameplay plane
    * @param {() => boolean} [o.followEnabled] whether absolute pointer-follow is on (mouse/pen)
    * @param {() => boolean} o.isActive whether gameplay input is accepted right now
    * @param {() => void} o.onPause Escape / P
@@ -60,10 +60,13 @@ export class InputController {
     return dxPx / Math.max(1e-3, this.o.pxPerUnit());
   }
 
-  /** Which steering zone a touch at `clientX` is in: left or right half of the playfield. */
-  _zoneSide(el, clientX) {
-    const r = el.getBoundingClientRect();
-    return clientX < r.left + r.width / 2 ? 'left' : 'right';
+  _x(el, e) {
+    return this.o.localX(el, e);
+  }
+
+  /** Which steering zone a touch is in: left or right half of the playfield. */
+  _zoneSide(el, e) {
+    return this._x(el, e) < el.clientWidth / 2 ? 'left' : 'right';
   }
 
   _bindDrag(el, surface) {
@@ -80,7 +83,7 @@ export class InputController {
         } catch {
           /* capture can fail for synthetic pointers; the hold still works while inside */
         }
-        const side = this._zoneSide(el, e.clientX);
+        const side = this._zoneSide(el, e);
         this.zones.set(e.pointerId, side);
         state.holdStart(side, e.pointerId);
         return;
@@ -92,13 +95,13 @@ export class InputController {
       } catch {
         /* capture can fail for synthetic pointers; drag still works while inside */
       }
-      this.lastX.set(e.pointerId, e.clientX);
+      this.lastX.set(e.pointerId, this._x(el, e));
     });
     el.addEventListener('pointermove', (e) => {
       // A touch sliding across the middle switches sides without lifting.
       const zone = this.zones.get(e.pointerId);
       if (zone) {
-        const side = this._zoneSide(el, e.clientX);
+        const side = this._zoneSide(el, e);
         if (side !== zone) {
           state.holdEnd(zone, e.pointerId);
           state.holdStart(side, e.pointerId);
@@ -109,12 +112,13 @@ export class InputController {
       // Absolute pointer-follow (mouse/pen only): the cart tracks the hovering pointer, no
       // button needed. An active drag still takes priority.
       if (e.pointerType !== 'touch' && o.followEnabled?.() && o.isActive() && o.worldX) {
-        state.setFollow(o.worldX(e.clientX));
+        state.setFollow(o.worldX(this._x(el, e)));
       }
       if (!state.isDragging(e.pointerId)) return;
-      const last = this.lastX.get(e.pointerId) ?? e.clientX;
-      this.lastX.set(e.pointerId, e.clientX);
-      state.dragMove(e.pointerId, this._worldDelta(e.clientX - last));
+      const x = this._x(el, e);
+      const last = this.lastX.get(e.pointerId) ?? x;
+      this.lastX.set(e.pointerId, x);
+      state.dragMove(e.pointerId, this._worldDelta(x - last));
     });
     const end = (e) => {
       const zone = this.zones.get(e.pointerId);

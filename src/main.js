@@ -23,6 +23,7 @@ const params = new URLSearchParams(location.search);
 /** Dev/test facility: only active with ?debug in the URL, never shown in the player UI. */
 const DEBUG = params.has('debug');
 const QUALITY_ORDER = ['high', 'medium', 'low'];
+const TOUCH_VIEW_HEIGHT = 600;
 /** First-encounter hints, keyed by item type, stage modifier, or 'terrain:<id>'. */
 const HINTS = {
   demon: 'DEMON! Touch it and the run ends — no hearts, no shields',
@@ -104,6 +105,7 @@ class App {
     this.introLeft = 0;
     this.realTime = 0;
     this.orientation = null;
+    this.view = { scale: 1, rot: false, key: '' };
     this.pendingStart = null;
     this.resultTimer = 0;
     this.perf = { samples: [], cooldown: 3, fps: 0 };
@@ -127,11 +129,8 @@ class App {
     this.input = new InputController(this.inputState, {
       playfield: $('scene'),
       pxPerUnit: () => this.layout?.pxPerUnit || 30,
-      worldX: (clientX) => {
-        if (!this.layout) return NaN;
-        const rect = $('scene').getBoundingClientRect();
-        return this.layout.toWorld(clientX - rect.left, 0).x;
-      },
+      localX: (el, e) => this.localPoint(el, e.clientX, e.clientY).x,
+      worldX: (x) => (this.layout ? this.layout.toWorld(x, 0).x : NaN),
       followEnabled: () => this.store.settings.pointerFollow,
       isActive: () => this.sim.phase === PHASE.PLAYING && !this.ui.anyOpen,
       onPause: () => this.onPauseKey(),
@@ -173,6 +172,7 @@ class App {
     const observer = new ResizeObserver(() => this.relayout());
     observer.observe($('frame'));
     window.addEventListener('orientationchange', () => setTimeout(() => this.relayout(), 50));
+    window.addEventListener('resize', () => this.relayout());
     this.relayout();
     this.buildPreviews();
     this.ui.setLoading(false);
@@ -263,13 +263,47 @@ class App {
     this.ui.buildLegend(icons);
   }
 
+  _fitView() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const touch = !!window.matchMedia?.('(pointer: coarse)').matches;
+    const rot = touch && h > w;
+    const short = rot ? w : h;
+    const scale = touch ? Math.min(1, short / TOUCH_VIEW_HEIGHT) : 1;
+    const key = `${w}x${h}:${rot}:${scale}`;
+    if (key === this.view.key) return;
+    this.view = { scale, rot, key };
+    const page = $('page');
+    if (!rot && scale === 1) {
+      page.removeAttribute('style');
+      return;
+    }
+    const s = page.style;
+    s.width = `${(rot ? h : w) / scale}px`;
+    s.height = `${short / scale}px`;
+    s.transformOrigin = '0 0';
+    s.transform = `${rot ? `translateX(${w}px) rotate(90deg) ` : ''}scale(${scale})`;
+    const sides = rot ? ['right', 'bottom', 'left', 'top'] : ['top', 'right', 'bottom', 'left'];
+    ['t', 'r', 'b', 'l'].forEach((k, i) => s.setProperty(`--safe-${k}`, `calc(env(safe-area-inset-${sides[i]}, 0px) / ${scale})`));
+  }
+
+  localPoint(el, x, y) {
+    const r = el.getBoundingClientRect();
+    const { scale, rot } = this.view;
+    return rot ? { x: (y - r.top) / scale, y: (r.right - x) / scale } : { x: (x - r.left) / scale, y: (y - r.top) / scale };
+  }
+
   relayout() {
-    const rect = $('frame').getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) return;
-    const insets = this.ui.applyHudMode(rect.width, rect.height);
-    this.layout = computeLayout(rect.width, rect.height, insets);
+    this._fitView();
+    const frame = $('frame');
+    const width = frame.clientWidth;
+    const height = frame.clientHeight;
+    if (width < 2 || height < 2) return;
+    const insets = this.ui.applyHudMode(width, height);
+    this.layout = computeLayout(width, height, insets);
+    this.layout.scale = this.view.scale;
     this.renderer?.resize(this.layout);
-    const orientation = rect.width >= rect.height ? 'landscape' : 'portrait';
+    const orientation = window.innerWidth >= window.innerHeight ? 'landscape' : 'portrait';
     if (this.orientation && orientation !== this.orientation) this.autoPause('rotate');
     this.orientation = orientation;
   }

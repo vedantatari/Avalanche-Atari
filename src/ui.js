@@ -707,13 +707,13 @@ export class UI {
   _starBurst(star) {
     const layer = $('result-sparkles');
     const a = star.getBoundingClientRect();
-    const b = layer.getBoundingClientRect();
+    const p = this.app.localPoint(layer, a.left + a.width / 2, a.top + a.height / 2);
     for (let i = 0; i < 7; i++) {
       const angle = (i / 7) * Math.PI * 2 + Math.random() * 0.4;
       const reach = 28 + Math.random() * 18;
       spark(layer, 'burst', {
-        left: `${(a.left + a.width / 2 - b.left).toFixed(1)}px`,
-        top: `${(a.top + a.height / 2 - b.top).toFixed(1)}px`,
+        left: `${p.x.toFixed(1)}px`,
+        top: `${p.y.toFixed(1)}px`,
         '--tx': `${(Math.cos(angle) * reach).toFixed(1)}px`,
         '--ty': `${(Math.sin(angle) * reach).toFixed(1)}px`,
         '--s': `${(6 + Math.random() * 6).toFixed(1)}px`,
@@ -816,13 +816,12 @@ export class UI {
     const mode = width < 700 && height > width * 1.05 ? 'compact' : height < 480 || width < 700 ? 'short' : width < 940 ? 'mid' : 'wide';
     if (this.frame.dataset.hud !== mode) this.frame.dataset.hud = mode;
     this.frame.toggleAttribute('data-narrow', width < 380);
-    const frameRect = this.frame.getBoundingClientRect();
-    const top = $('hud-top').getBoundingClientRect();
-    const bottom = $('hud-bottom').getBoundingClientRect();
-    this.frame.style.setProperty('--toast-top', `${Math.round(top.bottom - frameRect.top + 10)}px`);
+    const top = $('hud-top');
+    const topEdge = top.offsetTop + top.offsetHeight;
+    this.frame.style.setProperty('--toast-top', `${Math.round(topEdge + 10)}px`);
     return {
-      top: Math.max(0, top.bottom - frameRect.top) + 8,
-      bottom: Math.max(0, frameRect.bottom - bottom.top) + 6,
+      top: Math.max(0, topEdge) + 8,
+      bottom: Math.max(0, height - $('hud-bottom').offsetTop) + 6,
       left: 0,
       right: 0,
     };

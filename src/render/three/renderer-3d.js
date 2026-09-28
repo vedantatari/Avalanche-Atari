@@ -333,7 +333,7 @@ export class Renderer3D {
   /** Applies a layout from render/layout.js (CSS pixels) to canvas size and camera frustum. */
   resize(layout) {
     this.layout = layout;
-    const dpr = Math.min(window.devicePixelRatio || 1, this.q.dprCap);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.q.dprCap) * (layout.scale || 1);
     this.renderer.setPixelRatio(dpr);
     this.renderer.setSize(Math.max(1, Math.round(layout.width)), Math.max(1, Math.round(layout.height)), false);
     this._setFrustum(this.camera, layout.view);

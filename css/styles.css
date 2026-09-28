@@ -85,6 +85,7 @@ button {
   position: fixed;
   inset: 0;
   display: flex;
+  container-type: size;
 }
 
 .stage-wrap {
@@ -1754,7 +1755,7 @@ button {
   font-size: 20px;
 }
 
-@media (max-width: 420px) {
+@container (max-width: 420px) {
   .card {
     padding: 18px 16px;
   }
@@ -2619,7 +2620,7 @@ button {
   50% { translate: 4px 0; }
 }
 
-@media (max-width: 520px) {
+@container (max-width: 520px) {
   .result-card {
     padding: 24px 14px 16px;
   }
@@ -2657,7 +2658,7 @@ button {
   }
 }
 
-@media (max-height: 760px) {
+@container (max-height: 760px) {
   .result-card {
     gap: 8px;
   }
@@ -3000,68 +3001,7 @@ button {
   color: var(--navy);
 }
 
-.rotate-hint {
-  display: none;
-}
-
-@media (orientation: portrait) and (pointer: coarse) and (max-width: 767px) {
-  .rotate-hint {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 24px;
-    background: radial-gradient(120% 80% at 50% 30%, #2b3d52 0%, var(--navy) 70%);
-    color: #fff;
-    text-align: center;
-  }
-
-  .rotate-hint svg {
-    width: 96px;
-    height: 96px;
-    animation: rotate-hint 2.6s ease-in-out infinite;
-  }
-
-  .rotate-hint p {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .rotate-hint small {
-    font-size: 15px;
-    color: rgba(255, 255, 255, 0.72);
-  }
-}
-
-@keyframes rotate-hint {
-  0%,
-  25% {
-    transform: rotate(0deg);
-  }
-  55%,
-  85% {
-    transform: rotate(-90deg);
-  }
-  100% {
-    transform: rotate(0deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rotate-hint svg {
-    animation: none;
-    transform: rotate(-90deg);
-  }
-}
-
-@media (orientation: landscape) and (max-height: 500px) {
+@container (orientation: landscape) and (max-height: 500px) {
   .menu-side {
     border-top: 0;
     padding-top: 0;
