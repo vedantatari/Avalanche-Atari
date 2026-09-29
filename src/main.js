@@ -23,7 +23,7 @@ const params = new URLSearchParams(location.search);
 /** Dev/test facility: only active with ?debug in the URL, never shown in the player UI. */
 const DEBUG = params.has('debug');
 const QUALITY_ORDER = ['high', 'medium', 'low'];
-const TOUCH_VIEW_HEIGHT = 600;
+const TOUCH_VIEW_HEIGHT = 640;
 /** First-encounter hints, keyed by item type, stage modifier, or 'terrain:<id>'. */
 const HINTS = {
   demon: 'DEMON! Touch it and the run ends — no hearts, no shields',
@@ -272,7 +272,7 @@ class App {
     const scale = touch ? Math.min(1, short / TOUCH_VIEW_HEIGHT) : 1;
     const key = `${w}x${h}:${rot}:${scale}`;
     if (key === this.view.key) return;
-    this.view = { scale, rot, key };
+    this.view = { scale, rot, key, fill: touch };
     const page = $('page');
     if (!rot && scale === 1) {
       page.removeAttribute('style');
@@ -299,7 +299,7 @@ class App {
     const width = frame.clientWidth;
     const height = frame.clientHeight;
     if (width < 2 || height < 2) return;
-    const insets = this.ui.applyHudMode(width, height);
+    const insets = this.ui.applyHudMode(width, height, this.view.fill);
     this.layout = computeLayout(width, height, insets);
     this.layout.scale = this.view.scale;
     this.renderer?.resize(this.layout);

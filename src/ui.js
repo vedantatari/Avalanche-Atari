@@ -812,16 +812,27 @@ export class UI {
   // ------------------------------------------------------------------ HUD
 
   /** Picks a HUD arrangement for the frame size, then returns the insets it occupies. */
-  applyHudMode(width, height) {
+  applyHudMode(width, height, fill = false) {
     const mode = width < 700 && height > width * 1.05 ? 'compact' : height < 480 || width < 700 ? 'short' : width < 940 ? 'mid' : 'wide';
     if (this.frame.dataset.hud !== mode) this.frame.dataset.hud = mode;
     this.frame.toggleAttribute('data-narrow', width < 380);
     const top = $('hud-top');
+    if (this.frame.hasAttribute('data-fill') !== fill) {
+      this.frame.toggleAttribute('data-fill', fill);
+      (fill ? top : $('hud-bottom')).append($('bank-pill'), this.frame.querySelector('.restore-group'));
+    }
+    delete this.frame.dataset.tight;
+    if (fill) {
+      for (const t of ['1', '2']) {
+        const w = $('score-pill').offsetWidth;
+        if (w && w < 260) this.frame.dataset.tight = t;
+      }
+    }
     const topEdge = top.offsetTop + top.offsetHeight;
     this.frame.style.setProperty('--toast-top', `${Math.round(topEdge + 10)}px`);
     return {
-      top: Math.max(0, topEdge) + 8,
-      bottom: Math.max(0, height - $('hud-bottom').offsetTop) + 6,
+      top: Math.max(0, topEdge) + (fill ? -10 : 8),
+      bottom: fill ? 0 : Math.max(0, height - $('hud-bottom').offsetTop) + 6,
       left: 0,
       right: 0,
     };
