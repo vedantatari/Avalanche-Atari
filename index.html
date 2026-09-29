@@ -40,6 +40,8 @@
       <symbol id="i-cart" viewBox="0 0 24 24"><path d="M2.5 6.5h19l-2.4 9H4.9Z"/><circle cx="8" cy="19" r="2.1"/><circle cx="16" cy="19" r="2.1"/></symbol>
       <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M9.4 9.4a2.7 2.7 0 1 1 3.7 2.5c-.8.4-1.1.9-1.1 1.9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.35"/></symbol>
       <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.6" fill="none" stroke="currentColor" stroke-width="2.3"/><path d="M12 2.8v3.1M12 18.1v3.1M2.8 12h3.1M18.1 12h3.1M5.5 5.5l2.2 2.2M16.3 16.3l2.2 2.2M5.5 18.5l2.2-2.2M16.3 7.7l2.2-2.2" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></symbol>
+      <symbol id="i-mountain" viewBox="0 0 24 24"><path d="M1.8 20.5 9 7.5l3.6 6.2 2.4-3.9 7.2 10.7Z"/><path d="M9 7.5 6.6 11.8l1.7-.8 1.2 1.1 1-1.3 1.3.6Z" fill="#fff"/><path d="M15 9.8l-1.5 2.4 1-.3.8.7.9-.7Z" fill="#fff"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.5v11M7.2 10l4.8 4.8 4.8-4.8M4.5 19.5h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
       <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 4.5 7.5 7.5L9 19.5" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     </svg>
 
@@ -48,6 +50,7 @@
       <main class="stage-wrap">
         <section class="frame" id="frame" aria-label="Avalanche game" data-hud="wide">
           <div class="scene" id="scene"></div>
+          <div class="fx-layer" id="fx-layer" aria-hidden="true"></div>
 
           <div class="hud-top" id="hud-top">
             <div class="pill level-pill"><span class="lbl">LEVEL</span><b id="hud-level">01</b></div>
@@ -67,9 +70,6 @@
             <div class="pill hearts-pill" id="hud-hearts" role="img" aria-label="3 of 3 hearts">
               <svg class="heart"><use href="#i-heart" /></svg><svg class="heart"><use href="#i-heart" /></svg><svg class="heart"><use href="#i-heart" /></svg>
             </div>
-            <button class="pill icon-btn" id="btn-hud-fullscreen" type="button" data-fullscreen aria-label="Full screen" hidden>
-              <svg class="ico" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label sr-only">Full screen</span>
-            </button>
             <button class="pill icon-btn" id="btn-pause" type="button" aria-label="Pause">
               <svg class="ico" aria-hidden="true"><use href="#i-pause" /></svg>
             </button>
@@ -79,18 +79,12 @@
           <div class="sr-only" id="announcer" aria-live="assertive"></div>
 
           <div class="hud-bottom" id="hud-bottom">
-            <div class="bank-pill" id="bank-pill" aria-label="Shield bank">
+            <div class="restore-note" id="restore-note" role="status"></div>
+            <button class="shield-btn" id="btn-restore" type="button" aria-describedby="restore-note" aria-label="Restore a heart">
               <svg class="ico shield" aria-hidden="true"><use href="#i-shield" /></svg>
-              <span class="lbl">BANK</span><b id="hud-bank">0</b>
-            </div>
-            <div class="restore-group">
-              <button class="restore-btn" id="btn-restore" type="button" aria-describedby="restore-note">
-                <svg class="ico heart" aria-hidden="true"><use href="#i-heart" /></svg>
-                <span class="restore-label">RESTORE</span><span class="restore-cost" id="hud-cost"><span class="dot">•</span> 1 <span class="unit">SHIELD</span></span>
-              </button>
-              <div class="used" id="hud-used">0 / 4 <span class="unit">USED</span></div>
-              <div class="restore-note" id="restore-note">Hearts full</div>
-            </div>
+              <b class="shield-count" id="hud-bank">0</b>
+              <span class="shield-plus" aria-hidden="true"><svg class="plus-heart"><use href="#i-heart" /></svg>+1</span>
+            </button>
           </div>
 
           <!-- Stage intro -->
@@ -102,40 +96,57 @@
           </div>
 
           <!-- Menu -->
-          <div class="overlay" id="ov-menu" hidden>
-            <div class="card menu-card">
-              <div class="menu-main">
-                <h1 class="title">AVALANCHE</h1>
-                <p class="tagline">Catch the marked rocks. Dodge the fire.</p>
-                <button class="btn resume-run" id="btn-resume-run" type="button" hidden>Resume run <span class="sub" id="resume-note">Level 1</span></button>
-                <div class="level-stepper">
-                  <button class="btn square" id="btn-level-prev" type="button" aria-label="Previous level">‹</button>
-                  <button class="btn level-pick" id="btn-levels" type="button" aria-label="All levels"><small>All levels</small><b id="menu-level">Level 1</b></button>
-                  <button class="btn square" id="btn-level-next" type="button" aria-label="Next level">›</button>
-                </div>
-                <button class="btn primary big play-btn" id="btn-play" type="button"><svg class="ico" aria-hidden="true"><use href="#i-play" /></svg>Play</button>
+          <div class="overlay home" id="ov-menu" hidden>
+            <div class="home-brand">
+              <h1 class="title">AVALANCHE</h1>
+              <p class="tagline">Catch the marked rocks. Dodge the fire.</p>
+            </div>
+            <div class="home-top">
+              <button class="round-btn" id="btn-install" type="button" aria-label="Install app" hidden><svg class="ico" aria-hidden="true"><use href="#i-download" /></svg></button>
+              <button class="round-btn fullscreen-btn" id="btn-fullscreen" type="button" data-fullscreen aria-label="Full screen" hidden><svg class="ico fs-icon" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label sr-only">Full screen</span></button>
+              <button class="round-btn" id="btn-settings" type="button" aria-label="Settings"><svg class="ico" aria-hidden="true"><use href="#i-gear" /></svg></button>
+            </div>
+            <nav class="home-side" aria-label="Game menu">
+              <button class="side-btn" id="btn-carts" type="button"><span class="side-ico"><svg class="ico" aria-hidden="true"><use href="#i-cart" /></svg></span><b>Carts</b><span class="sub" id="cart-note"></span></button>
+              <button class="side-btn" id="btn-trophies" type="button"><span class="side-ico"><svg class="ico" aria-hidden="true"><use href="#i-trophy" /></svg></span><b>Trophies</b><span class="sub" id="trophy-note"></span></button>
+              <button class="side-btn" id="btn-scores" type="button"><span class="side-ico"><svg class="ico" aria-hidden="true"><use href="#i-chart" /></svg></span><b>Scores</b></button>
+              <button class="side-btn" id="btn-legend" type="button"><span class="side-ico"><img id="legend-btn-img" alt="" /></span><b>Rocks</b></button>
+              <button class="side-btn" id="btn-howto" type="button"><span class="side-ico"><svg class="ico" aria-hidden="true"><use href="#i-help" /></svg></span><b>How to play</b></button>
+            </nav>
+            <div class="home-cta">
+              <button class="btn resume-run" id="btn-resume-run" type="button" hidden>Resume run <span class="sub" id="resume-note">Level 1</span></button>
+              <div class="home-row">
+                <button class="btn home-mini" id="btn-modes" type="button"><svg class="ico" aria-hidden="true"><use href="#i-spark" /></svg>Modes</button>
+                <button class="btn home-mini" id="btn-levels" type="button" aria-label="Level map"><svg class="ico" aria-hidden="true"><use href="#i-mountain" /></svg>Map</button>
               </div>
-              <div class="menu-side">
-                <div class="mode-row">
-                  <button class="btn mode mode-demo" id="btn-demo" type="button"><svg class="ico" aria-hidden="true"><use href="#i-spark" /></svg><b>Demo</b><span class="sub">Try it all</span></button>
-                  <button class="btn mode mode-endless" id="btn-endless" type="button"><svg class="ico" aria-hidden="true"><use href="#i-infinity" /></svg><b>Endless</b><span class="sub">No finish line</span></button>
-                  <button class="btn mode mode-daily" id="btn-daily" type="button"><svg class="ico" aria-hidden="true"><use href="#i-calendar" /></svg><b>Daily</b><span class="sub" id="daily-note"></span></button>
-                </div>
-                <div class="tool-grid">
-                  <button class="tool" id="btn-carts" type="button"><svg class="ico" aria-hidden="true"><use href="#i-cart" /></svg><b>Carts</b><span class="sub" id="cart-note"></span></button>
-                  <button class="tool" id="btn-trophies" type="button"><svg class="ico" aria-hidden="true"><use href="#i-trophy" /></svg><b>Trophies</b><span class="sub" id="trophy-note"></span></button>
-                  <button class="tool" id="btn-scores" type="button"><svg class="ico" aria-hidden="true"><use href="#i-chart" /></svg><b>Scores</b><span class="sub">Best runs</span></button>
-                  <button class="tool" id="btn-legend" type="button" aria-label="Rock guide"><img id="legend-btn-img" alt="" /><b>Rocks</b><span class="sub">What's what</span></button>
-                  <button class="tool" id="btn-howto" type="button"><svg class="ico" aria-hidden="true"><use href="#i-help" /></svg><b>How to play</b><span class="sub">Controls</span></button>
-                  <button class="tool" id="btn-settings" type="button"><svg class="ico" aria-hidden="true"><use href="#i-gear" /></svg><b>Settings</b><span class="sub">Sound &amp; more</span></button>
-                </div>
-                <div class="menu-foot app-row">
-                  <button class="btn link-btn fullscreen-btn" id="btn-fullscreen" type="button" data-fullscreen hidden>
-                    <svg class="fs-icon" aria-hidden="true"><use href="#i-expand" /></svg><span class="fs-label">Full screen</span>
-                  </button>
-                  <button class="btn link-btn" id="btn-install" type="button" hidden>Install app</button>
-                </div>
-                <p class="menu-note" id="menu-note" hidden></p>
+              <button class="btn primary big play-btn" id="btn-play" type="button"><span class="play-main"><svg class="ico" aria-hidden="true"><use href="#i-play" /></svg>Play</span><span class="play-level" id="menu-level">Level 1</span></button>
+            </div>
+            <p class="menu-note" id="menu-note" hidden></p>
+          </div>
+
+          <div class="overlay" id="ov-modes" hidden>
+            <div class="card modes-card">
+              <div class="card-head">
+                <h2>Modes</h2>
+                <button class="btn" type="button" data-close>Back</button>
+              </div>
+              <div class="mode-row">
+                <button class="btn mode mode-demo" id="btn-demo" type="button"><svg class="ico" aria-hidden="true"><use href="#i-spark" /></svg><b>Demo</b><span class="sub">Try every rock and storm</span></button>
+                <button class="btn mode mode-endless" id="btn-endless" type="button"><svg class="ico" aria-hidden="true"><use href="#i-infinity" /></svg><b>Endless</b><span class="sub">No finish line</span></button>
+                <button class="btn mode mode-daily" id="btn-daily" type="button"><svg class="ico" aria-hidden="true"><use href="#i-calendar" /></svg><b>Daily</b><span class="sub" id="daily-note"></span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="overlay reward-ov" id="ov-reward" hidden>
+            <div class="confetti" id="reward-confetti" aria-hidden="true"></div>
+            <div class="card reward-card" role="dialog" aria-labelledby="reward-title">
+              <p class="reward-kicker" id="reward-kicker"></p>
+              <div class="reward-art" id="reward-art"></div>
+              <h2 id="reward-title"></h2>
+              <p class="reward-desc" id="reward-desc"></p>
+              <div class="card-actions">
+                <button class="btn primary big" id="btn-reward-ok" type="button">Awesome!</button>
               </div>
             </div>
           </div>
@@ -144,12 +155,11 @@
           <div class="overlay" id="ov-levels" hidden>
             <div class="card levels-card">
               <div class="card-head">
-                <h2>Choose level</h2>
+                <h2>Mountain map</h2>
                 <button class="btn" type="button" data-close>Back</button>
               </div>
-              <div class="level-pages" id="level-pages" role="tablist" aria-label="Level pages"></div>
-              <div class="level-grid" id="level-grid"></div>
-              <p class="hint" id="levels-hint">Clear a level to unlock the next. Odd levels are Volcano, even levels are Ice. Marked levels have weather: ≋ windy · ☁&#xFE0E; fog · ✦ gold rush.</p>
+              <div class="level-map" id="level-map"></div>
+              <p class="hint" id="levels-hint">Clear a level to climb higher. Odd levels are Volcano, even levels are Ice, and every 10th level unlocks a new cart. ≋ windy · ☁&#xFE0E; fog · ✦ gold rush</p>
             </div>
           </div>
 

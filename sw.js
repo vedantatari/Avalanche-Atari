@@ -20,6 +20,8 @@ const PRECACHE = [
   './assets/carts/cart-8.png',
   './assets/carts/cart-9.png',
   './assets/favicon.svg',
+  './assets/fonts/OFL.txt',
+  './assets/fonts/fredoka.woff2',
   './assets/icons/apple-touch-icon.png',
   './assets/icons/icon-192.png',
   './assets/icons/icon-512.png',

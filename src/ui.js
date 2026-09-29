@@ -1,5 +1,5 @@
 // DOM HUD, menus, and overlays. Reads game state; sends player intents to the app.
-import { MODIFIERS, RUN, TERRAIN_RULES } from './config.js';
+import { ARENA, MODIFIERS, RUN, TERRAIN_RULES } from './config.js';
 import { ITEM_TYPES } from './game/items.js';
 import { MODES } from './game/simulation.js';
 import { LEVEL_COUNT, levelTerrain, stageDuration, stageModifier } from './game/levels.js';
@@ -14,7 +14,9 @@ const clock = (seconds) => {
   const s = Math.max(0, Math.ceil(seconds - 1e-6));
   return `${pad2(Math.floor(s / 60))}:${pad2(s % 60)}`;
 };
-const PAGE_SIZE = 20;
+const MAP_STEP = 96;
+const MAP_PAD = 90;
+const CONFETTI = ['#ffcb2e', '#ff6b3d', '#40b1a6', '#3b8fe8', '#ff6fae', '#9b4dff'];
 const SPARKLES = {
   1: { burst: 0, twinkle: 4, size: [6, 10], opacity: 0.45 },
   2: { burst: 10, twinkle: 5, size: [8, 15], opacity: 0.8 },
@@ -52,7 +54,7 @@ export class UI {
   constructor(app) {
     this.app = app;
     this.frame = $('frame');
-    this.overlays = ['ov-menu', 'ov-levels', 'ov-settings', 'ov-howto', 'ov-pause', 'ov-revive', 'ov-result', 'ov-confirm', 'ov-context', 'ov-scores', 'ov-trophies', 'ov-carts', 'ov-legend'];
+    this.overlays = ['ov-menu', 'ov-levels', 'ov-settings', 'ov-howto', 'ov-pause', 'ov-revive', 'ov-result', 'ov-confirm', 'ov-context', 'ov-scores', 'ov-trophies', 'ov-carts', 'ov-legend', 'ov-modes', 'ov-reward'];
     this.stack = [];
     this.toastQueue = [];
     this.toastActive = false;
@@ -68,14 +70,14 @@ export class UI {
       hearts: $('hud-hearts'),
       heartEls: [...$('hud-hearts').querySelectorAll('.heart')],
       bank: $('hud-bank'),
-      cost: $('hud-cost'),
-      used: $('hud-used'),
       restore: $('btn-restore'),
       note: $('restore-note'),
     };
     this.last = {};
     this.icons = {};
-    this.levelPage = 0;
+    this.shownScore = 0;
+    this.rewards = [];
+    this.mapWidth = 0;
     this._bind();
   }
 
@@ -84,7 +86,7 @@ export class UI {
   _bind() {
     const app = this.app;
     const on = (id, fn) => $(id).addEventListener('click', (e) => {
-      app.audio.play('click');
+      app.tap();
       fn(e);
     });
     on('btn-play', () => app.play());
@@ -97,9 +99,18 @@ export class UI {
     on('btn-demo', () => app.startDemo());
     on('btn-legend', () => this.open('ov-legend'));
     on('btn-install', () => app.installApp());
-    on('btn-level-prev', () => app.selectLevel(app.selectedLevel - 1));
-    on('btn-level-next', () => app.selectLevel(app.selectedLevel + 1));
+    on('btn-modes', () => this.open('ov-modes'));
     on('btn-levels', () => this.showLevels());
+    on('btn-reward-ok', () => this._nextReward());
+    $('level-map').addEventListener('click', (e) => {
+      const node = e.target.closest('.map-node');
+      if (!node || node.disabled) return;
+      app.tap();
+      app.startLevel(Number(node.dataset.level));
+    });
+    new ResizeObserver(() => {
+      if (this.isOpen('ov-levels') && $('level-map').clientWidth !== this.mapWidth) this._renderLevels(false);
+    }).observe($('level-map'));
     on('btn-howto', () => this.showHowto(false));
     on('btn-settings', () => this.showSettings());
     this._onTap($('btn-pause'), () => app.togglePause());
@@ -125,7 +136,7 @@ export class UI {
     on('btn-context-2d', () => app.switchRenderer('2d'));
     for (const el of document.querySelectorAll('[data-fullscreen]')) {
       el.addEventListener('click', () => {
-        app.audio.play('click');
+        app.tap();
         app.toggleFullscreen();
       });
     }
@@ -160,7 +171,7 @@ export class UI {
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'Escape') return;
       const top = this.stack[this.stack.length - 1];
-      if (top && ['ov-levels', 'ov-settings', 'ov-confirm', 'ov-scores', 'ov-trophies', 'ov-carts', 'ov-legend'].includes(top)) {
+      if (top && ['ov-levels', 'ov-settings', 'ov-confirm', 'ov-scores', 'ov-trophies', 'ov-carts', 'ov-legend', 'ov-modes'].includes(top)) {
         e.stopImmediatePropagation();
         this.closeTop();
       } else if (top === 'ov-howto') {
@@ -214,14 +225,14 @@ export class UI {
       if (!downs.delete(e.pointerId)) return;
       suppressUntil = performance.now() + 600;
       if (!el.disabled) {
-        this.app.audio.play('click');
+        this.app.tap();
         fn();
       }
     });
     el.addEventListener('pointercancel', (e) => downs.delete(e.pointerId));
     el.addEventListener('click', () => {
       if (performance.now() < suppressUntil) return;
-      this.app.audio.play('click');
+      this.app.tap();
       fn();
     });
   }
@@ -281,8 +292,6 @@ export class UI {
   refreshMenu() {
     const app = this.app;
     $('menu-level').textContent = app.selectedLevel ? `Level ${app.selectedLevel}` : 'Demo';
-    $('btn-level-prev').disabled = app.selectedLevel <= 0;
-    $('btn-level-next').disabled = app.selectedLevel >= app.store.data.unlockedLevel;
     const resume = app.store.data.resume;
     $('btn-resume-run').hidden = !resume;
     if (resume) {
@@ -304,66 +313,65 @@ export class UI {
   }
 
   showLevels() {
-    this.levelPage = Math.max(0, Math.floor((this.app.selectedLevel - 1) / PAGE_SIZE));
-    this._renderLevels();
     this.open('ov-levels');
+    this._renderLevels(true);
   }
 
-  _renderLevels() {
+  _renderLevels(scroll) {
     const app = this.app;
-    const pages = $('level-pages');
-    pages.replaceChildren();
-    for (let p = 0; p < Math.ceil(LEVEL_COUNT / PAGE_SIZE); p++) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.role = 'tab';
-      b.textContent = `${p * PAGE_SIZE + 1}–${Math.min(LEVEL_COUNT, (p + 1) * PAGE_SIZE)}`;
-      b.setAttribute('aria-selected', String(p === this.levelPage));
-      b.addEventListener('click', () => {
-        this.levelPage = p;
-        this._renderLevels();
-      });
-      pages.appendChild(b);
+    const map = $('level-map');
+    const width = map.clientWidth || 600;
+    this.mapWidth = width;
+    const height = MAP_PAD * 2 + LEVEL_COUNT * MAP_STEP;
+    const swing = Math.min(width * 0.3, 170);
+    const at = (level) => ({ x: Math.round(width / 2 + Math.sin(level * 0.8) * swing), y: height - MAP_PAD - level * MAP_STEP });
+    const frontier = app.store.data.unlockedLevel;
+    const focus = app.selectedLevel || frontier;
+    const cart = CART_TIERS[app.cartChoice()];
+    const parts = [];
+    for (let c = 0; c < LEVEL_COUNT / 10; c++) {
+      const top = at(c * 10 + 10).y - MAP_STEP / 2;
+      parts.push(`<div class="map-band band-${c % 2}" style="top:${top}px;height:${MAP_STEP * 10}px"><span>Chapter ${c + 1}</span></div>`);
     }
-    const grid = $('level-grid');
-    grid.replaceChildren();
-    const start = this.levelPage * PAGE_SIZE + 1;
-    if (this.levelPage === 0) {
-      const d = document.createElement('button');
-      d.type = 'button';
-      d.className = 'level-btn demo' + (app.selectedLevel === 0 ? ' current' : '');
-      d.innerHTML = '<b>DEMO</b><small>Try everything</small>';
-      d.setAttribute('aria-label', 'Demo level: try every rock, storm and terrain');
-      d.addEventListener('click', () => {
-        app.audio.play('click');
-        app.startLevel(0);
-      });
-      grid.appendChild(d);
+    let road = '';
+    let done = '';
+    for (let level = 1; level <= LEVEL_COUNT; level++) {
+      const a = at(level - 1);
+      const b = at(level);
+      const seg = `C${a.x} ${a.y - MAP_STEP / 2} ${b.x} ${b.y + MAP_STEP / 2} ${b.x} ${b.y}`;
+      road += seg;
+      if (level <= frontier) done += seg;
     }
-    for (let level = start; level < start + PAGE_SIZE && level <= LEVEL_COUNT; level++) {
+    const start = at(0);
+    parts.push(`<svg class="map-path" width="${width}" height="${height}" aria-hidden="true"><path class="road" d="M${start.x} ${start.y}${road}"/><path class="done" d="M${start.x} ${start.y}${done}"/><path class="dash" d="M${start.x} ${start.y}${road}"/></svg>`);
+    parts.push(`<button type="button" class="map-node demo${app.selectedLevel === 0 ? ' current' : ''}" data-level="0" style="left:${start.x}px;top:${start.y}px" aria-label="Demo level: try every rock, storm and terrain"><b>DEMO</b></button>`);
+    for (let level = 1; level <= LEVEL_COUNT; level++) {
+      const p = at(level);
       const unlocked = app.store.isUnlocked(level);
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'level-btn' + (level === app.selectedLevel ? ' current' : '');
-      b.disabled = !unlocked;
-      const best = app.store.bestScore(level);
       const stars = app.store.starsFor(level);
       const mod = stageModifier(level);
-      const modBadge = mod ? `<span class="mod mod-${mod}" title="${MODIFIERS[mod].label}" aria-hidden="true">${GLYPH[mod]}</span>` : '';
-      if (unlocked) {
-        const starRow = stars ? `<span class="stars" aria-hidden="true">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</span>` : '';
-        b.innerHTML = `${modBadge}<b>${level}</b>${starRow}<small>${best ? `Best ${best}` : `~${previewTarget(level, levelTerrain(level))} pts`}</small>`;
-        b.setAttribute('aria-label', `Level ${level}${mod ? `, ${MODIFIERS[mod].label}` : ''}${best ? `, best ${best}` : ''}${stars ? `, ${stars} star${stars === 1 ? '' : 's'}` : ''}`);
-        b.addEventListener('click', () => {
-          app.audio.play('click');
-          app.startLevel(level);
-        });
-      } else {
-        b.innerHTML = `<svg class="lock" aria-hidden="true"><use href="#i-lock"/></svg><small>${level}</small>`;
-        b.setAttribute('aria-label', `Level ${level}, locked`);
+      const cls = ['map-node', levelTerrain(level), unlocked ? '' : 'locked', level === frontier ? 'frontier' : '', level === app.selectedLevel ? 'current' : '', level % 10 === 0 ? 'checkpoint' : ''].filter(Boolean).join(' ');
+      const badge = mod && unlocked ? `<span class="mod mod-${mod}" aria-hidden="true">${GLYPH[mod]}</span>` : '';
+      const starRow = unlocked && (stars || level < frontier) ? `<span class="node-stars" aria-hidden="true">${'<i class="on">★</i>'.repeat(stars)}${'<i>★</i>'.repeat(3 - stars)}</span>` : '';
+      const face = unlocked ? `<b>${level}</b>` : '<svg class="lock" aria-hidden="true"><use href="#i-lock"/></svg>';
+      const label = unlocked ? `Level ${level}${mod ? `, ${MODIFIERS[mod].label}` : ''}${stars ? `, ${stars} star${stars === 1 ? '' : 's'}` : ''}` : `Level ${level}, locked`;
+      parts.push(`<button type="button" class="${cls}" data-level="${level}" style="left:${p.x}px;top:${p.y}px" aria-label="${label}"${unlocked ? '' : ' disabled'}>${face}${badge}${starRow}</button>`);
+      if (level % 10 === 0 && level < LEVEL_COUNT) {
+        const tier = CART_TIERS[level / 10];
+        const got = frontier > level;
+        const side = p.x > width / 2 ? -1 : 1;
+        parts.push(`<div class="map-cart${got ? ' got' : ''}" style="left:${p.x + side * 92}px;top:${p.y}px"><img alt="" src="${tier.sprite || tier.thumb}"><small>${got ? esc(tier.name) : `Clear ${level}`}</small></div>`);
       }
-      grid.appendChild(b);
     }
+    const top = at(LEVEL_COUNT);
+    parts.push(`<div class="map-summit" style="left:${top.x}px;top:${top.y - 74}px">Summit</div>`);
+    if (frontier <= LEVEL_COUNT) {
+      const you = at(focus);
+      const lean = at(focus + 1).x > you.x ? -1 : 1;
+      parts.push(`<img class="map-you" alt="" src="${cart.sprite || cart.thumb}" style="left:${you.x + lean * 78}px;top:${you.y - 18}px">`);
+    }
+    map.innerHTML = `<div class="map-track" style="height:${height}px">${parts.join('')}</div>`;
+    if (scroll) map.scrollTop = at(focus).y - map.clientHeight * 0.55;
   }
 
   showScores() {
@@ -408,7 +416,7 @@ export class UI {
       b.setAttribute('aria-label', `${t.name}. ${locked ? `Locked until level ${i * 10 + 1}` : i === current ? 'Selected' : 'Unlocked'}.`);
       b.innerHTML = `<img alt="" src="${t.sprite || t.thumb}"><b>${t.name}</b><small>${locked ? `${UNLOCK_ICON} Level ${i * 10 + 1}` : i === current ? 'Selected' : 'Tap to ride'}</small>`;
       b.addEventListener('click', () => {
-        this.app.audio.play('click');
+        this.app.tap();
         this.app.selectCart(i);
         this.renderCarts(i);
       });
@@ -518,6 +526,7 @@ export class UI {
   }
 
   showResult(r) {
+    clearTimeout(this.rewardTimer);
     const card = $('result-card');
     const endless = r.mode === MODES.ENDLESS;
     const daily = r.mode === MODES.DAILY;
@@ -624,10 +633,93 @@ export class UI {
     const retrySub = showNext ? '' : endless ? `Beat ${fmt(r.best)}` : daily ? 'Same rocks, another shot' : `Level ${r.level}`;
     if (retrySub) retry.dataset.sub = retrySub;
     else delete retry.dataset.sub;
+    this.rewards = [];
+    if (newCart) this.rewards.push({ kind: 'cart', tier: cartTier(r.unlocked) });
+    if (r.trophies?.length) this.rewards.push({ kind: 'trophies', list: r.trophies });
     this.closeAll();
     this.open('ov-result');
     (showNext ? next : retry).focus({ preventScroll: true });
     this._playResult(r, final);
+  }
+
+  _nextReward() {
+    const item = this.rewards.shift();
+    if (!item || !this.isOpen('ov-result')) {
+      this.rewards = [];
+      if (this.isOpen('ov-reward')) this.close('ov-reward');
+      return;
+    }
+    const art = $('reward-art');
+    if (item.kind === 'cart') {
+      const t = CART_TIERS[item.tier];
+      $('reward-kicker').textContent = 'New cart unlocked!';
+      art.innerHTML = `<img alt="" src="${t.sprite || t.thumb}">`;
+      $('reward-title').textContent = t.name;
+      $('reward-desc').textContent = "It's yours — you ride it from the next level. Swap any time in Carts.";
+    } else {
+      const n = item.list.length;
+      $('reward-kicker').textContent = n === 1 ? 'Trophy earned!' : `${n} trophies earned!`;
+      art.innerHTML = '<svg class="reward-trophy" aria-hidden="true"><use href="#i-trophy" /></svg>';
+      $('reward-title').textContent = n === 1 ? item.list[0].title : item.list.map((a) => a.title).join(' · ');
+      $('reward-desc').textContent = n === 1 ? item.list[0].desc : 'See them all in the Trophies cabinet.';
+    }
+    $('btn-reward-ok').textContent = this.rewards.length ? 'Next' : 'Awesome!';
+    const card = $('ov-reward').querySelector('.reward-card');
+    card.classList.remove('pop');
+    void card.offsetWidth;
+    card.classList.add('pop');
+    this.open('ov-reward');
+    this.app.audio.play(item.kind === 'cart' ? 'jackpot' : 'trophy');
+    this.app.haptic('trophy');
+    this._confetti();
+  }
+
+  _confetti() {
+    const layer = $('reward-confetti');
+    layer.replaceChildren();
+    if (this.app.store.settings.reducedMotion) return;
+    for (let i = 0; i < 70; i++) {
+      spark(layer, 'bit', {
+        left: `${(Math.random() * 100).toFixed(1)}%`,
+        '--c': CONFETTI[i % CONFETTI.length],
+        '--x': `${Math.round((Math.random() - 0.5) * 180)}px`,
+        '--r': `${Math.round(360 + Math.random() * 720)}deg`,
+        '--d': `${(Math.random() * 0.5).toFixed(2)}s`,
+        '--t': `${(1.6 + Math.random() * 1.2).toFixed(2)}s`,
+      });
+    }
+  }
+
+  _center(el) {
+    const r = el.getBoundingClientRect();
+    return this.app.localPoint(this.frame, r.left + r.width / 2, r.top + r.height / 2);
+  }
+
+  _bump(el) {
+    el.classList.remove('bump');
+    void el.offsetWidth;
+    el.classList.add('bump');
+  }
+
+  fly(src, x, y, to) {
+    const layer = $('fx-layer');
+    if (!src || this.app.store.settings.reducedMotion || layer.childElementCount > 10) return;
+    const target = to === 'shield' ? this.hud.restore : this.hud.bar.parentElement;
+    const end = this._center(target);
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = src;
+    layer.appendChild(img);
+    const mid = { x: x + (end.x - x) * 0.35, y: Math.min(y, end.y) - 70 };
+    const anim = img.animate([
+      { transform: `translate(${x}px, ${y}px) scale(0.95)` },
+      { transform: `translate(${mid.x}px, ${mid.y}px) scale(0.8)`, offset: 0.4 },
+      { transform: `translate(${end.x}px, ${end.y}px) scale(0.4)`, opacity: 0.85 },
+    ], { duration: 640, easing: 'cubic-bezier(.4,0,.7,1)' });
+    anim.onfinish = () => {
+      img.remove();
+      this._bump(to === 'shield' ? target : this.hud.scorePill);
+    };
   }
 
   _playResult(r, final) {
@@ -664,6 +756,8 @@ export class UI {
       if (!calm) this._fountain(FOUNTAIN[fx] || 0);
       if (tier === 3) this.app.audio.play('jackpot');
       else if (newBest) this.app.audio.play('cash');
+      clearTimeout(this.rewardTimer);
+      if (this.rewards.length) this.rewardTimer = setTimeout(() => this._nextReward(), 1100);
     };
     if (calm || final <= 0) return land();
     const duration = 900 + 250 * tier;
@@ -816,11 +910,8 @@ export class UI {
     const mode = width < 700 && height > width * 1.05 ? 'compact' : height < 480 || width < 700 ? 'short' : width < 940 ? 'mid' : 'wide';
     if (this.frame.dataset.hud !== mode) this.frame.dataset.hud = mode;
     this.frame.toggleAttribute('data-narrow', width < 380);
+    this.frame.toggleAttribute('data-fill', fill);
     const top = $('hud-top');
-    if (this.frame.hasAttribute('data-fill') !== fill) {
-      this.frame.toggleAttribute('data-fill', fill);
-      (fill ? top : $('hud-bottom')).append($('bank-pill'), this.frame.querySelector('.restore-group'));
-    }
     delete this.frame.dataset.tight;
     if (fill) {
       for (const t of ['1', '2']) {
@@ -830,12 +921,12 @@ export class UI {
     }
     const topEdge = top.offsetTop + top.offsetHeight;
     this.frame.style.setProperty('--toast-top', `${Math.round(topEdge + 10)}px`);
-    return {
-      top: Math.max(0, topEdge) + (fill ? -10 : 8),
-      bottom: fill ? 0 : Math.max(0, height - $('hud-bottom').offsetTop) + 6,
-      left: 0,
-      right: 0,
-    };
+    const insets = { top: Math.max(0, topEdge) + (fill ? -10 : 8), bottom: 0, left: 0, right: 0 };
+    const F = ARENA.frame;
+    const side = width - $('hud-bottom').offsetLeft + 6;
+    const spare = (width - ((height - insets.top) / (F.maxY - F.minY)) * (F.maxX - F.minX)) / 2;
+    if (spare < side) insets.left = insets.right = side;
+    return insets;
   }
 
   _set(key, value, apply) {
@@ -857,9 +948,12 @@ export class UI {
       h.level.textContent = v ? pad2(v) : 'DEMO';
       h.level.previousElementSibling.hidden = !v;
     });
-    this._set('score', score, (v) => (h.score.textContent = v));
+    this._set('idle', sim.phase === 'idle', (v) => this.frame.toggleAttribute('data-idle', v));
+    const shown = this.shownScore;
+    this.shownScore = !st || score < shown ? score : shown + Math.ceil((score - shown) * 0.2);
+    this._set('score', this.shownScore, (v) => (h.score.textContent = v));
     this._set('target', endless ? '∞' : target, (v) => (h.target.textContent = v));
-    this._set('bar', endless ? 100 : Math.min(100, Math.round((score / target) * 1000) / 10), (v) => (h.bar.style.width = `${v}%`));
+    this._set('bar', endless ? 100 : Math.min(100, Math.round((this.shownScore / target) * 1000) / 10), (v) => (h.bar.style.width = `${v}%`));
     this._set('reached', !!st?.targetReached, (v) => h.scorePill.classList.toggle('reached', v));
     this._set('mult', sim.scoreMultiplier(), (v) => {
       h.mult.hidden = v <= 1;
@@ -877,13 +971,10 @@ export class UI {
     this._set('bank', run ? run.bank : 0, (v) => (h.bank.textContent = v));
     const status = sim.restoreStatus();
     const cost = sim.run ? sim.nextRestoreCost() : RUN.restoreCosts[0];
-    this._set('cost', cost, (v) => {
-      h.cost.innerHTML = v === null ? '<span class="dot">•</span> —' : `<span class="dot">•</span> ${v} <span class="unit">SHIELD${v === 1 ? '' : 'S'}</span>`;
-    });
-    this._set('used', run ? run.restoresUsed : 0, (v) => (h.used.innerHTML = `${v} / ${RUN.restoreCosts.length} <span class="unit">USED</span>`));
-    this._set('restoreOk', status.ok, (v) => {
-      h.restore.disabled = !v;
-      h.restore.setAttribute('aria-label', v ? `Restore one heart for ${cost} shield${cost === 1 ? '' : 's'}` : 'Restore unavailable');
+    this._set('restoreOk', `${status.ok}:${cost}`, () => {
+      h.restore.classList.toggle('ready', status.ok);
+      h.restore.setAttribute('aria-disabled', String(!status.ok));
+      h.restore.setAttribute('aria-label', status.ok ? `Restore one heart for ${cost} shield${cost === 1 ? '' : 's'}` : 'Restore unavailable');
     });
     const note = status.ok ? '' : status.reason === 'need-shields' ? `Need ${status.need} more shield${status.need === 1 ? '' : 's'}` : RESTORE_NOTES[status.reason] ?? '';
     this._set('note', note, (v) => (h.note.textContent = v));

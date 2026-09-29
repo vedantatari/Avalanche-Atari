@@ -79,6 +79,7 @@ const HAPTICS = {
   lose: 120,
   trophy: [15, 50, 15, 50, 30],
   revive: 70,
+  tap: 6,
 };
 
 class App {
@@ -451,6 +452,11 @@ class App {
     if (e.itemType === 'mystery') this.audio.play(e.reveal === 'jackpot' ? 'jackpot' : 'mystery');
     if (EFFECT_SOUND[acts]) this.audio.play(EFFECT_SOUND[acts]);
     this._haptic(e.comboBonus || e.reveal === 'jackpot' ? 'combo' : isNegative(acts) ? 'bad' : 'good');
+    const to = acts === 'shield' ? 'shield' : acts === 'coin' || acts === 'cash' || acts === 'split' || e.reveal === 'jackpot' ? 'score' : null;
+    if (to && this.layout) {
+      const p = this.layout.toScreen(e.x, e.y);
+      this.ui.fly(this.ui.icons[e.itemType], p.x, p.y, to);
+    }
     if (e.comboBonus) {
       this.audio.play('multiplier');
       this.ui.announce(`Combo ${e.combo}! Bonus ${e.comboBonus} points.`);
@@ -542,11 +548,20 @@ class App {
     });
   }
 
+  tap() {
+    this.audio.play('click');
+    this._haptic('tap');
+  }
+
+  haptic(kind) {
+    this._haptic(kind);
+  }
+
   /** Vibration feedback (phones that support it, when enabled); rapid catch pulses are thinned out. */
   _haptic(kind) {
     if (!this.store.settings.haptics || !HAPTICS[kind]) return;
     const now = performance.now();
-    if ((kind === 'good' || kind === 'split') && now - this.lastHaptic < 60) return;
+    if ((kind === 'good' || kind === 'split' || kind === 'tap') && now - this.lastHaptic < 60) return;
     this.lastHaptic = now;
     try {
       navigator.vibrate?.(HAPTICS[kind]);
